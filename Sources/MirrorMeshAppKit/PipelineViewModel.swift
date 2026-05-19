@@ -143,20 +143,47 @@ public final class PipelineViewModel: ObservableObject {
     }
 
     /// Push the SwiftUI settings panel's current toggle values into the live pipeline so the
-    /// renderer + watermarker react to user input without restarting the session.
+    /// renderer + watermarker react to user input without restarting the session. The render
+    /// style is the master toggle — it preselects what's visible. Granular overrides
+    /// (showLandmarks / showAvatarMask) apply on top within the wireframe style only.
     public func applySettings() {
-        let opts = Renderer.Options(
-            showLandmarks: settings.showLandmarks,
-            showAvatarMask: settings.showAvatarMask
-        )
+        let opts = rendererOptions(for: settings.renderStyle)
         let watermarkVisible = settings.watermarkVisible
         let p = pipeline
         Task {
             await p?.setRendererOptions(opts)
             await p?.setWatermarkVisible(watermarkVisible)
         }
-        // Mirror in the @Published flag so the watermark hero card dims accordingly.
         watermarkActive = watermarkVisible || settings.watermarkLockedInRelease
+    }
+
+    /// Map a `RenderStyle` to a `Renderer.Options` preset. Wireframe is the only style that
+    /// honors the granular landmark/avatar overrides; Mirror and Mask are intentionally clean.
+    private func rendererOptions(for style: RenderStyle) -> Renderer.Options {
+        switch style {
+        case .wireframe:
+            return Renderer.Options(
+                showLandmarks: settings.showLandmarks,
+                showAvatarMask: settings.showAvatarMask,
+                showFaceMesh: true,
+                meshStyle: .wireframe,
+                meshColor: SIMD4(0.0, 1.0, 0.4, 0.9)
+            )
+        case .mirror:
+            return Renderer.Options(
+                showLandmarks: false,
+                showAvatarMask: false,
+                showFaceMesh: false
+            )
+        case .mask:
+            return Renderer.Options(
+                showLandmarks: false,
+                showAvatarMask: false,
+                showFaceMesh: true,
+                meshStyle: .filled,
+                meshColor: SIMD4(0.92, 0.74, 0.58, 0.95)  // warm skin-toned fill for the synthetic face
+            )
+        }
     }
 
     /// Stop the active session. M37: we leave `latestFrame` populated so the last frame stays
@@ -339,6 +366,7 @@ public final class AppSettings: ObservableObject {
         public static let showLandmarks   = "mirrormesh.showLandmarks"
         public static let showAvatarMask  = "mirrormesh.showAvatarMask"
         public static let watermarkVisible = "mirrormesh.watermarkVisible"
+        public static let renderStyle     = "mirrormesh.renderStyle"
     }
 
     /// Default suite name. Tests pass their own to stay isolated.
@@ -347,6 +375,7 @@ public final class AppSettings: ObservableObject {
     @Published public var showLandmarks: Bool { didSet { defaults.set(showLandmarks, forKey: Keys.showLandmarks) } }
     @Published public var showAvatarMask: Bool { didSet { defaults.set(showAvatarMask, forKey: Keys.showAvatarMask) } }
     @Published public var watermarkVisible: Bool { didSet { defaults.set(watermarkVisible, forKey: Keys.watermarkVisible) } }
+    @Published public var renderStyle: RenderStyle { didSet { defaults.set(renderStyle.rawValue, forKey: Keys.renderStyle) } }
 
     /// Release builds never let users hide the watermark. We surface that as a locked toggle.
     public let watermarkLockedInRelease: Bool
@@ -356,6 +385,7 @@ public final class AppSettings: ObservableObject {
     public init(showLandmarks: Bool = true,
                 showAvatarMask: Bool = true,
                 watermarkVisible: Bool = true,
+                renderStyle: RenderStyle = .wireframe,
                 suiteName: String? = "ai.mirrormesh") {
         // Why: a named suite avoids polluting the host process's standard defaults and lets
         // tests inject a unique suite for isolation. Falls back to standard if the suite fails.
@@ -365,6 +395,11 @@ public final class AppSettings: ObservableObject {
         self.showLandmarks    = (store.object(forKey: Keys.showLandmarks)    as? Bool) ?? showLandmarks
         self.showAvatarMask   = (store.object(forKey: Keys.showAvatarMask)   as? Bool) ?? showAvatarMask
         self.watermarkVisible = (store.object(forKey: Keys.watermarkVisible) as? Bool) ?? watermarkVisible
+        if let raw = store.string(forKey: Keys.renderStyle), let style = RenderStyle(rawValue: raw) {
+            self.renderStyle = style
+        } else {
+            self.renderStyle = renderStyle
+        }
         #if DEBUG
         self.watermarkLockedInRelease = false
         #else

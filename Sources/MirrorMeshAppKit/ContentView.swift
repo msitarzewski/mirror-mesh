@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import MirrorMeshCore
 
 /// Main window: camera preview as hero, telemetry strip beneath, settings in an inspector panel
 /// per Apple's canonical macOS layout. Toolbar drives session lifecycle. Materials carry the
@@ -220,12 +221,31 @@ private struct SettingsInspector: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Show landmarks overlay", isOn: $settings.showLandmarks)
-                Toggle("Show avatar mask", isOn: $settings.showAvatarMask)
+                // Picker hero: this is the master switch in v0.5.0.
+                Picker("Render style", selection: $settings.renderStyle) {
+                    ForEach(RenderStyle.allCases, id: \.self) { style in
+                        Label(style.displayName, systemImage: style.symbolName).tag(style)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+                Text(settings.renderStyle.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } header: {
-                Text("Visual overlays")
+                Text("Style")
+            }
+
+            Section {
+                Toggle("Show landmarks overlay", isOn: $settings.showLandmarks)
+                    .disabled(settings.renderStyle != .wireframe)
+                Toggle("Show avatar mask", isOn: $settings.showAvatarMask)
+                    .disabled(settings.renderStyle != .wireframe)
+            } header: {
+                Text("Wireframe overlays")
             } footer: {
-                Text("Toggles affect what the renderer composites on top of the captured frame. They do not change what's recorded.")
+                Text("These overrides only apply in Wireframe style. Mirror and Mask hide them by design.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
