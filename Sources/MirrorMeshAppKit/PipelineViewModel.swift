@@ -106,6 +106,17 @@ public final class PipelineViewModel: ObservableObject {
         startTicker()
     }
 
+    /// Push the SwiftUI settings panel's current toggle values into the live pipeline so the
+    /// renderer reacts to user input without restarting the session.
+    public func applySettings() {
+        let opts = Renderer.Options(
+            showLandmarks: settings.showLandmarks,
+            showAvatarMask: settings.showAvatarMask
+        )
+        let p = pipeline
+        Task { await p?.setRendererOptions(opts) }
+    }
+
     public func stop() {
         guard running else { return }
         running = false

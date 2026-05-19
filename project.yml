@@ -82,11 +82,12 @@ targets:
       base:
         PRODUCT_NAME: MirrorMesh
         PRODUCT_BUNDLE_IDENTIFIER: ai.mirrormesh.MirrorMesh
-        MARKETING_VERSION: "0.3.0-dev"
+        MARKETING_VERSION: "0.4.0-dev"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: MirrorMesh/Info.plist
         CODE_SIGN_ENTITLEMENTS: MirrorMesh/MirrorMesh.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # DEVELOPMENT_TEAM / CODE_SIGN_IDENTITY come from Local.xcconfig (gitignored).
         # Until the user pastes their Team ID into Local.xcconfig, signing is
         # automatic-with-no-team, which builds for local debugging only.

@@ -89,7 +89,7 @@ public struct PipelineResult: Sendable {
 /// End-to-end orchestrator: capture → vision → solver → render → watermark.
 /// Owns a session manifest and a JSONL telemetry sink.
 public actor Pipeline {
-    public let options: PipelineOptions
+    public private(set) var options: PipelineOptions
     public let manifestURL: URL
     public let jsonlURL: URL?
 
@@ -97,6 +97,7 @@ public actor Pipeline {
     // Why: SwiftUI preview needs the latest RenderedFrame after each render; the callback fires
     // post-render and pre-watermark accounting so a Metal preview sees pixels with minimum delay.
     private var onRender: (@Sendable (RenderedFrame) -> Void)?
+    private var renderer: Renderer?
 
     public init(options: PipelineOptions,
                 manifestURL: URL,
@@ -110,6 +111,13 @@ public actor Pipeline {
     /// Note: invoked from the pipeline actor; downstream code must hop to its own isolation.
     public func setOnRender(_ cb: (@Sendable (RenderedFrame) -> Void)?) {
         self.onRender = cb
+    }
+
+    /// Update the renderer's overlay toggles live (driven by the SwiftUI Settings panel).
+    /// No-op when the pipeline hasn't started yet — the next start() reads `options.rendererOptions`.
+    public func setRendererOptions(_ opts: Renderer.Options) {
+        options.rendererOptions = opts
+        renderer?.options = opts
     }
 
     public func run() async throws -> PipelineResult {
@@ -163,6 +171,7 @@ public actor Pipeline {
             outputSize: (options.captureWidth, options.captureHeight),
             options: options.rendererOptions
         )
+        self.renderer = renderer
         let signer = FrameSigner()
         let badge = try VisibleBadge()
         let watermarker = Watermarker(signer: signer, badge: badge)

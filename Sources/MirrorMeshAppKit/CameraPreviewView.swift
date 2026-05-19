@@ -6,8 +6,9 @@ import CoreVideo
 import MirrorMeshCore
 
 /// Camera preview backed by an `MTKView`. Subscribes to `PipelineViewModel.latestFrame` and
-/// blits the underlying `CVPixelBuffer` to the view's drawable via `CVMetalTextureCache` (zero copy).
-/// Falls back to a colored placeholder when no frame is available or Metal is unavailable (CI).
+/// blits the underlying `CVPixelBuffer` to the view's drawable. The drawable size tracks the
+/// source so `CAMetalLayer.contentsGravity = .resizeAspect` produces a proper letterbox/pillarbox.
+@MainActor
 public struct CameraPreviewView: View {
     @ObservedObject var viewModel: PipelineViewModel
 
@@ -17,93 +18,91 @@ public struct CameraPreviewView: View {
 
     public var body: some View {
         ZStack {
-            // Why: keep a placeholder behind the Metal view so CI / missing-GPU hosts still show
-            // something legible while the renderer hasn't produced a frame yet.
+            // Black "stage" behind the aspect-fit preview. Keeps the letterbox edges clean.
+            Color.black
             placeholder
+                .opacity(viewModel.latestFrame == nil ? 1 : 0)
             MetalPreviewRepresentable(latestFrame: viewModel.latestFrame)
                 .opacity(viewModel.latestFrame == nil ? 0 : 1)
-                .animation(.easeIn(duration: 0.15), value: viewModel.latestFrame?.frameID.value)
+                .animation(.easeIn(duration: 0.2), value: viewModel.latestFrame?.frameID.value)
             VStack {
                 Spacer()
                 HStack {
-                    overlayLabel
+                    overlayBadge
                     Spacer()
                 }
-                .padding(10)
+                .padding(12)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(0.15), lineWidth: 1)
-        )
     }
 
     private var placeholder: some View {
         LinearGradient(
-            colors: [.indigo.opacity(0.85), .purple.opacity(0.6)],
+            colors: [Color(.sRGB, red: 0.18, green: 0.10, blue: 0.36),
+                     Color(.sRGB, red: 0.38, green: 0.12, blue: 0.42)],
             startPoint: .topLeading, endPoint: .bottomTrailing
         )
         .overlay(
-            VStack(spacing: 6) {
+            VStack(spacing: 10) {
                 Image(systemName: "camera.viewfinder")
-                    .font(.system(size: 38, weight: .light))
+                    .font(.system(size: 42, weight: .thin))
                     .foregroundStyle(.white.opacity(0.85))
-                Text(viewModel.running ? "warming up…" : "no source")
+                Text(viewModel.running ? "Warming up…" : "No source")
                     .font(.title3.weight(.medium))
                     .foregroundStyle(.white.opacity(0.95))
                 Text(viewModel.running
-                     ? "synthetic preview starting"
-                     : "press Start Session for a real consent-gated capture")
+                     ? "Synthetic preview starting"
+                     : "Press Start Session for a real consent-gated capture")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }
         )
     }
 
-    private var overlayLabel: some View {
+    private var overlayBadge: some View {
         HStack(spacing: 8) {
-            // Why: distinguish preview (auto-loop) from real session in the corner badge so
-            // viewers know whether they're looking at a recording-grade artifact or a demo loop.
             if viewModel.isPreview {
                 Text("PREVIEW")
                     .font(.caption2.weight(.bold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.orange.opacity(0.85), in: Capsule())
+                    .background(Color.orange.opacity(0.9), in: Capsule())
                     .foregroundStyle(.black)
             } else if viewModel.running {
                 Text("SESSION")
                     .font(.caption2.weight(.bold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Color.green.opacity(0.85), in: Capsule())
+                    .background(Color.green.opacity(0.9), in: Capsule())
                     .foregroundStyle(.black)
             }
             Group {
                 if let frame = viewModel.latestFrame {
-                    Text("frame \(frame.frameID.value) — \(frame.width)x\(frame.height)")
+                    Text("frame \(frame.frameID.value) — \(frame.width)×\(frame.height)")
                 } else if viewModel.running {
                     Text("warming up…")
                 } else {
-                    Text("idle — press Start Session")
+                    Text("idle")
                 }
             }
             .foregroundStyle(.white)
         }
         .font(.caption.monospaced())
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.black.opacity(0.55), in: Capsule())
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
     }
 }
 
 // MARK: - MTKView bridge
 
 /// SwiftUI bridge around `MTKView`. The view holds a coordinator that owns the
-/// `CVMetalTextureCache` and renders the latest pixel buffer on each `draw`.
+/// `CVMetalTextureCache` and blits the latest pixel buffer on each `draw`. The drawable size
+/// is sized to the source so CAMetalLayer.contentsGravity = .resizeAspect produces a proper
+/// aspect-fit (letterbox / pillarbox) when the view's frame doesn't match.
 private struct MetalPreviewRepresentable: NSViewRepresentable {
     let latestFrame: RenderedFrame?
 
@@ -112,8 +111,6 @@ private struct MetalPreviewRepresentable: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSView {
-        // Why: in headless/CI we can't get a Metal device; fall back to a plain NSView so the
-        // SwiftUI tree still compiles + lays out. Higher up we keep the placeholder visible.
         guard let device = MTLCreateSystemDefaultDevice() else {
             let v = NSView()
             v.wantsLayer = true
@@ -125,8 +122,12 @@ private struct MetalPreviewRepresentable: NSViewRepresentable {
         view.framebufferOnly = false
         view.isPaused = true
         view.enableSetNeedsDisplay = true
-        view.autoResizeDrawable = true
+        view.autoResizeDrawable = false
         view.layer?.isOpaque = true
+        if let metalLayer = view.layer as? CAMetalLayer {
+            metalLayer.contentsGravity = .resizeAspect
+            metalLayer.backgroundColor = NSColor.black.cgColor
+        }
         context.coordinator.attach(view: view, device: device)
         view.delegate = context.coordinator
         return view
@@ -152,16 +153,15 @@ private struct MetalPreviewRepresentable: NSViewRepresentable {
         }
 
         func update(frame: RenderedFrame?, view: MTKView) {
-            // Why: avoid redundant redraws when SwiftUI re-renders for unrelated state changes.
             if let frame, currentFrame?.frameID != frame.frameID {
                 currentFrame = frame
+                let desired = CGSize(width: frame.width, height: frame.height)
+                if view.drawableSize != desired { view.drawableSize = desired }
                 view.setNeedsDisplay(view.bounds)
             } else if frame == nil {
                 currentFrame = nil
             }
         }
-
-        // MARK: MTKViewDelegate
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
@@ -188,16 +188,14 @@ private struct MetalPreviewRepresentable: NSViewRepresentable {
                   let blit = cb.makeBlitCommandEncoder()
             else { return }
 
-            // Why: copy the renderer's BGRA frame into the drawable; sizes may differ if the
-            // window has been resized, so clamp to the smaller extent on each axis.
             let dst = drawable.texture
-            let copyW = min(w, dst.width)
-            let copyH = min(h, dst.height)
+            // Drawable is sized to (w, h) by update(), so a 1:1 blit fills it. CAMetalLayer
+            // then scales the drawable to the view bounds with aspect-fit.
             blit.copy(
                 from: srcTex,
                 sourceSlice: 0, sourceLevel: 0,
                 sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                sourceSize: MTLSize(width: copyW, height: copyH, depth: 1),
+                sourceSize: MTLSize(width: w, height: h, depth: 1),
                 to: dst,
                 destinationSlice: 0, destinationLevel: 0,
                 destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
