@@ -114,7 +114,9 @@ public actor Pipeline {
 
     public func run() async throws -> PipelineResult {
         // ── telemetry ───────────────────────────────────────────────
-        await Telemetry.shared.clearSinks()
+        // Don't clearSinks — earlier versions wiped sinks the caller had attached (e.g. the
+        // SwiftUI app's RingBufferSink), so the UI's telemetry panel stayed at zero forever.
+        // Pipeline adds its own JSONL logger when configured; callers manage the rest.
         var jsonlSink: JSONLLogger?
         if let url = jsonlURL {
             jsonlSink = try JSONLLogger(url: url)

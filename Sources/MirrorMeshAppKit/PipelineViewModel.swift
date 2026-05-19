@@ -169,10 +169,23 @@ public final class PipelineViewModel: ObservableObject {
     }
 
     private func refreshPublishedLatency() {
-        // Why: pull a snapshot from the shared ring buffer rather than maintaining a duplicate
-        // histogram on this actor — keeps perStageLatencyMs aligned with what the telemetry pane shows.
+        // Build per-stage histograms from the ring buffer's recent .frame events. The ring
+        // buffer is the single source of truth; recomputing each tick avoids a separate sink
+        // and any sync headaches. O(ring-capacity) = 4096 entries at 10 Hz = negligible.
+        var perStage: [StageID: LatencyHistogram] = [:]
+        for stage in StageID.allCases { perStage[stage] = LatencyHistogram() }
+
+        for event in ringBuffer.snapshot() {
+            if case let .frame(_, perStageMs, e2eMs) = event {
+                for (stage, ms) in perStageMs {
+                    perStage[stage]?.record(ms)
+                }
+                perStage[.pipeline]?.record(e2eMs)
+            }
+        }
+
         var out: [StageID: StageLatency] = [:]
-        for (stage, h) in histograms where h.sampleCount > 0 {
+        for (stage, h) in perStage where h.sampleCount > 0 {
             out[stage] = StageLatency(p50: h.p50, p95: h.p95, samples: h.sampleCount)
         }
         self.perStageLatencyMs = out

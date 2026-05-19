@@ -73,15 +73,11 @@ public final class VisibleBadge: @unchecked Sendable {
         }
 
         let inset = 8
-        let rect = badgeRect(in: CGSize(width: width, height: height), inset: CGFloat(inset))
-        // Flip vertically so Core Graphics' upward-Y matches the buffer's downward-Y origin.
-        ctx.saveGState()
-        ctx.translateBy(x: 0, y: CGFloat(height))
-        ctx.scaleBy(x: 1, y: -1)
-        let drawRect = CGRect(x: rect.origin.x,
-                              y: CGFloat(height) - rect.origin.y - rect.size.height,
-                              width: rect.size.width,
-                              height: rect.size.height)
+        // Draw in CG-native coordinates (origin bottom-left). The badge ends up at the visual
+        // bottom of the image because CGContext-from-CVPixelBuffer keeps CG's Y-up convention.
+        // Previously we double-flipped (translate+scale AND re-mapped rect.y) which left the
+        // text glyphs mirrored — fixed by removing the flip entirely.
+        let drawRect = badgeRect(in: CGSize(width: width, height: height), inset: CGFloat(inset))
 
         ctx.setFillColor(red: 0, green: 0, blue: 0, alpha: CGFloat(opacity))
         ctx.fill(drawRect)
@@ -93,8 +89,6 @@ public final class VisibleBadge: @unchecked Sendable {
                  in: drawRect.insetBy(dx: 4, dy: 4),
                  context: ctx,
                  height: height)
-
-        ctx.restoreGState()
     }
 
     private func badgeRect(in size: CGSize, inset: CGFloat) -> CGRect {
