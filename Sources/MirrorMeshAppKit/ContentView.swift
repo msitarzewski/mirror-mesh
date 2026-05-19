@@ -20,6 +20,12 @@ public struct ContentView: View {
             Divider()
             SettingsView(settings: viewModel.settings)
         }
+        .onAppear {
+            // Why: auto-start the synthetic preview so the empty state is alive, not a flat
+            // gradient with "Camera preview" text. The user still has to press "Start Session"
+            // for a real consent-gated session.
+            if !viewModel.running { viewModel.startPreview() }
+        }
         .toolbar { toolbarContent }
         .sheet(isPresented: $showConsent) {
             ConsentSheet(consent: Binding(
@@ -88,19 +94,29 @@ public struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            if viewModel.running {
+            // Why: text + icon so the call-to-action is obvious. The old icon-only button
+            // hid the affordance and users wondered why nothing happened.
+            if viewModel.running && !viewModel.isPreview {
                 Button(role: .destructive) {
                     viewModel.stop()
                 } label: {
                     Label("Stop Session", systemImage: "stop.circle.fill")
                 }
+                .labelStyle(.titleAndIcon)
+                .controlSize(.large)
             } else {
                 Button {
-                    // Why: route every start through the consent gate, even on restart.
+                    // Stop the auto-running preview before showing the consent sheet so
+                    // the pipeline isn't busy when the real session takes over.
+                    if viewModel.running { viewModel.stop() }
                     showConsent = true
                 } label: {
                     Label("Start Session", systemImage: "play.circle.fill")
                 }
+                .labelStyle(.titleAndIcon)
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .tint(.accentColor)
             }
         }
     }

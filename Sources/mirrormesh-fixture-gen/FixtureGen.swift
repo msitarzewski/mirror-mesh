@@ -1,5 +1,8 @@
 import Foundation
-import AVFoundation
+// @preconcurrency: AVAssetWriterInput and AVAssetWriterInputPixelBufferAdaptor are not
+// formally Sendable yet, but the documented requestMediaDataWhenReady(on:using:) contract
+// hands them to a serial queue — no concurrent access from us. See R14-adjacent footgun.
+@preconcurrency import AVFoundation
 import CoreVideo
 import CoreGraphics
 import CoreImage
@@ -83,27 +86,32 @@ struct FixtureGen {
         writer.startSession(atSourceTime: .zero)
 
         let queue = DispatchQueue(label: "ai.mirrormesh.fixturegen")
+        // requestMediaDataWhenReady serializes calls onto `queue`, so the captured
+        // `input`/`adaptor` are never touched concurrently. They're not formally Sendable;
+        // wrap in nonisolated(unsafe) so Swift 6 strict concurrency stops warning.
+        nonisolated(unsafe) let unsafeInput = input
+        nonisolated(unsafe) let unsafeAdaptor = adaptor
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             var frameIndex: Int64 = 0
-            input.requestMediaDataWhenReady(on: queue) {
-                while input.isReadyForMoreMediaData {
+            unsafeInput.requestMediaDataWhenReady(on: queue) {
+                while unsafeInput.isReadyForMoreMediaData {
                     if frameIndex >= durationFrames {
-                        input.markAsFinished()
+                        unsafeInput.markAsFinished()
                         cont.resume()
                         return
                     }
-                    guard let pool = adaptor.pixelBufferPool,
+                    guard let pool = unsafeAdaptor.pixelBufferPool,
                           let pb = createBuffer(pool: pool,
                                                 width: width,
                                                 height: height,
                                                 index: frameIndex) else {
-                        input.markAsFinished()
+                        unsafeInput.markAsFinished()
                         cont.resume()
                         return
                     }
                     let pts = CMTime(value: frameIndex, timescale: fps)
-                    if !adaptor.append(pb, withPresentationTime: pts) {
-                        input.markAsFinished()
+                    if !unsafeAdaptor.append(pb, withPresentationTime: pts) {
+                        unsafeInput.markAsFinished()
                         cont.resume()
                         return
                     }

@@ -48,7 +48,12 @@ public final class MetalContext {
         let sources = ["Passthrough", "LandmarkSprite", "AvatarMask"]
         var combined = ""
         for name in sources {
-            guard let url = Bundle.module.url(forResource: name, withExtension: "metal") else {
+            // .copy("Shaders") preserves the subdirectory in the bundle. The earlier .process
+            // variant flattened paths but compiled .metal away entirely; .copy keeps the source
+            // at the cost of needing the explicit subdir hint here. R14 captures the rule.
+            guard let url = Bundle.module.url(
+                forResource: name, withExtension: "metal", subdirectory: "Shaders"
+            ) else {
                 throw MetalContextError.shaderResourceMissing("\(name).metal")
             }
             let src = try String(contentsOf: url, encoding: .utf8)

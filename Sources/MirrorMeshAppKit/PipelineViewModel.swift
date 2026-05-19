@@ -31,6 +31,9 @@ public final class PipelineViewModel: ObservableObject {
 
     /// Watermark visible-overlay status. Wired to settings; the renderer is the source of truth in release.
     @Published public var watermarkActive: Bool = true
+    /// True while `startPreview()` is driving an auto-running synthetic loop on launch.
+    /// False after the user has explicitly hit "Start Session" with consent.
+    @Published public var isPreview: Bool = false
 
     public let ringBuffer: RingBufferSink
     public let settings: AppSettings
@@ -106,10 +109,31 @@ public final class PipelineViewModel: ObservableObject {
     public func stop() {
         guard running else { return }
         running = false
+        isPreview = false
         pipelineTask?.cancel()
         ticker?.cancel()
         let p = pipeline
         Task { await p?.stop() }
+    }
+
+    /// Auto-running synthetic preview shown on launch so the app shows life immediately,
+    /// without requiring the consent sheet. The output is *not* a real session — manifest
+    /// lands in `tmp/`, gets overwritten each launch, and the UI shows `Preview` instead
+    /// of `Session`. Pressing "Start Session" stops the preview and prompts for consent.
+    public func startPreview() {
+        guard !running else { return }
+        // Why: consent is required by `start(mode:)`. Inject a preview-only record so the
+        // gate opens. The hash is of the preview disclosure text — distinguishable from
+        // a real user-accepted consent.
+        consent = ConsentRecord(
+            scheme: .selfAsSource,
+            accepted_at: Date(),
+            user_disclosure_text_sha256: ConsentRecord.hashDisclosure(
+                "MirrorMesh preview — synthetic loop; not a recorded session."
+            )
+        )
+        isPreview = true
+        start(mode: .synthetic)
     }
 
     // MARK: - Internals

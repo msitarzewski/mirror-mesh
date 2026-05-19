@@ -20,7 +20,7 @@ public enum RendererError: Error, CustomStringConvertible {
 /// `@unchecked Sendable`: the renderer is designed for single-threaded use from the pipeline's
 /// render executor. Metal command-buffer encoding is not Sendable.
 public final class Renderer: @unchecked Sendable {
-    public struct Options {
+    public struct Options: Sendable {
         public var showLandmarks: Bool
         public var showAvatarMask: Bool
         public init(showLandmarks: Bool = true, showAvatarMask: Bool = true) {

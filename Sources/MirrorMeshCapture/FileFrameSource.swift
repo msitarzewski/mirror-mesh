@@ -101,7 +101,8 @@ public actor FileFrameSource: FrameSource {
             throw FileError.readerSetupFailed("cannot add track output")
         }
         reader.add(output)
-        let timescale = track.naturalTimeScale
+        // macOS 13+ async accessor; the deprecated sync property triggers a build warning.
+        let timescale = try await track.load(.naturalTimeScale)
         return (reader, output, timescale)
     }
 

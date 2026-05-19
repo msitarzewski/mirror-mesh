@@ -45,27 +45,58 @@ public struct CameraPreviewView: View {
             startPoint: .topLeading, endPoint: .bottomTrailing
         )
         .overlay(
-            Text(viewModel.running ? "warming up…" : "Camera preview")
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.white.opacity(0.9))
+            VStack(spacing: 6) {
+                Image(systemName: "camera.viewfinder")
+                    .font(.system(size: 38, weight: .light))
+                    .foregroundStyle(.white.opacity(0.85))
+                Text(viewModel.running ? "warming up…" : "no source")
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.95))
+                Text(viewModel.running
+                     ? "synthetic preview starting"
+                     : "press Start Session for a real consent-gated capture")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
         )
     }
 
     private var overlayLabel: some View {
-        Group {
-            if let frame = viewModel.latestFrame {
-                Text("frame \(frame.frameID.value) — \(frame.width)x\(frame.height) — host \(frame.hostTimeNs / 1_000_000) ms")
+        HStack(spacing: 8) {
+            // Why: distinguish preview (auto-loop) from real session in the corner badge so
+            // viewers know whether they're looking at a recording-grade artifact or a demo loop.
+            if viewModel.isPreview {
+                Text("PREVIEW")
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.85), in: Capsule())
+                    .foregroundStyle(.black)
             } else if viewModel.running {
-                Text("warming up…")
-            } else {
-                Text("idle — press Start Session")
+                Text("SESSION")
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.green.opacity(0.85), in: Capsule())
+                    .foregroundStyle(.black)
             }
+            Group {
+                if let frame = viewModel.latestFrame {
+                    Text("frame \(frame.frameID.value) — \(frame.width)x\(frame.height)")
+                } else if viewModel.running {
+                    Text("warming up…")
+                } else {
+                    Text("idle — press Start Session")
+                }
+            }
+            .foregroundStyle(.white)
         }
         .font(.caption.monospaced())
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(.black.opacity(0.55), in: Capsule())
-        .foregroundStyle(.white)
     }
 }
 

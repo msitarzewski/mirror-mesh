@@ -11,6 +11,8 @@ xcuserdata/
 *.xccheckout
 build/
 bench/out/*.jsonl
+bench/out/*.manifest.json
+bench/out/*.mov
 !bench/out/.keep
 models/*.mlmodel
 models/*.mlmodelc
