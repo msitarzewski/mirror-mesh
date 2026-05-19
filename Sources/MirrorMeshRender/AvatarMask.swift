@@ -63,6 +63,11 @@ public final class AvatarMask {
         self.placement = placement
     }
 
+    /// Display-side amplification so the cartoon mask reacts visibly to subtle expressions
+    /// from the geometric solver. Will be reduced to 1.0 once M34 (CoreML weights) replaces
+    /// the geometric path with model-driven coefficients that are already well-scaled.
+    public var responsivenessGain: Float = 2.2
+
     public func encode(into encoder: MTLRenderCommandEncoder, blendshapes: BlendshapeFrame?) {
         // Convert top-left normalized rect to clip-space rect (-1..1, +y up).
         let r = placement.rectNorm
@@ -73,17 +78,20 @@ public final class AvatarMask {
         let bottomYClip = topYClip - heightClip
 
         let c = blendshapes
+        let g = responsivenessGain
+        // Amplify each coefficient, clamping to [0, 1] so the shader doesn't see >1 inputs.
+        let amp = { (v: Float) -> Float in min(1, max(0, v * g)) }
         var uniforms = AvatarUniforms(
             rectOriginClip: SIMD2(originXClip, bottomYClip),
             rectSizeClip:   SIMD2(widthClip, heightClip),
-            jawOpen:        c?.coefficient(.jawOpen) ?? 0,
-            browInnerUp:    c?.coefficient(.browInnerUp) ?? 0,
-            browDownLeft:   c?.coefficient(.browDownLeft) ?? 0,
-            browDownRight:  c?.coefficient(.browDownRight) ?? 0,
-            eyeBlinkLeft:   c?.coefficient(.eyeBlinkLeft) ?? 0,
-            eyeBlinkRight:  c?.coefficient(.eyeBlinkRight) ?? 0,
-            mouthSmileLeft: c?.coefficient(.mouthSmileLeft) ?? 0,
-            mouthSmileRight: c?.coefficient(.mouthSmileRight) ?? 0
+            jawOpen:        amp(c?.coefficient(.jawOpen) ?? 0),
+            browInnerUp:    amp(c?.coefficient(.browInnerUp) ?? 0),
+            browDownLeft:   amp(c?.coefficient(.browDownLeft) ?? 0),
+            browDownRight:  amp(c?.coefficient(.browDownRight) ?? 0),
+            eyeBlinkLeft:   amp(c?.coefficient(.eyeBlinkLeft) ?? 0),
+            eyeBlinkRight:  amp(c?.coefficient(.eyeBlinkRight) ?? 0),
+            mouthSmileLeft: amp(c?.coefficient(.mouthSmileLeft) ?? 0),
+            mouthSmileRight: amp(c?.coefficient(.mouthSmileRight) ?? 0)
         )
 
         encoder.setRenderPipelineState(pipelineState)

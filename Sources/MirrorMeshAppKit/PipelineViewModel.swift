@@ -107,14 +107,20 @@ public final class PipelineViewModel: ObservableObject {
     }
 
     /// Push the SwiftUI settings panel's current toggle values into the live pipeline so the
-    /// renderer reacts to user input without restarting the session.
+    /// renderer + watermarker react to user input without restarting the session.
     public func applySettings() {
         let opts = Renderer.Options(
             showLandmarks: settings.showLandmarks,
             showAvatarMask: settings.showAvatarMask
         )
+        let watermarkVisible = settings.watermarkVisible
         let p = pipeline
-        Task { await p?.setRendererOptions(opts) }
+        Task {
+            await p?.setRendererOptions(opts)
+            await p?.setWatermarkVisible(watermarkVisible)
+        }
+        // Mirror in the @Published flag so the watermark hero card dims accordingly.
+        watermarkActive = watermarkVisible || settings.watermarkLockedInRelease
     }
 
     public func stop() {

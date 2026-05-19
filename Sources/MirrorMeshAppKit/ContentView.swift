@@ -35,6 +35,7 @@ public struct ContentView: View {
             }
             .onChange(of: viewModel.settings.showLandmarks) { _, _ in viewModel.applySettings() }
             .onChange(of: viewModel.settings.showAvatarMask) { _, _ in viewModel.applySettings() }
+            .onChange(of: viewModel.settings.watermarkVisible) { _, _ in viewModel.applySettings() }
             .sheet(isPresented: $showConsent) { consentSheet }
             .alert(
                 "Camera Access Required",

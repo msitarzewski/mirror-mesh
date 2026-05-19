@@ -98,6 +98,7 @@ public actor Pipeline {
     // post-render and pre-watermark accounting so a Metal preview sees pixels with minimum delay.
     private var onRender: (@Sendable (RenderedFrame) -> Void)?
     private var renderer: Renderer?
+    private var watermarker: Watermarker?
 
     public init(options: PipelineOptions,
                 manifestURL: URL,
@@ -118,6 +119,12 @@ public actor Pipeline {
     public func setRendererOptions(_ opts: Renderer.Options) {
         options.rendererOptions = opts
         renderer?.options = opts
+    }
+
+    /// Toggle the visible watermark badge live. In release builds, the underlying Watermarker
+    /// ignores attempts to disable it (per projectRules R2).
+    public func setWatermarkVisible(_ visible: Bool) {
+        watermarker?.visible = visible
     }
 
     public func run() async throws -> PipelineResult {
@@ -175,6 +182,7 @@ public actor Pipeline {
         let signer = FrameSigner()
         let badge = try VisibleBadge()
         let watermarker = Watermarker(signer: signer, badge: badge)
+        self.watermarker = watermarker
 
         // ── manifest ───────────────────────────────────────────────
         let consent = ConsentRecord(
