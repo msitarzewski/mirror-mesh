@@ -1,0 +1,10 @@
+{
+  "name": "capture_landmark",
+  "mode": "synthetic",
+  "width": 1280,
+  "height": 720,
+  "fps": 60,
+  "frames": 300,
+  "show_landmarks": true,
+  "show_avatar_mask": false
+}

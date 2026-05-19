@@ -1,0 +1,94 @@
+name: CI
+
+# Why: every push & PR must rebuild + test + run the fixture-driven bench.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  # Why: collapse duplicate runs for the same ref to save runner minutes.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-bench:
+    name: Build, Test, Bench (macOS arm64)
+    # Why: macos-14 is the current Apple-silicon GHA runner image (arm64).
+    # macos-latest still points to Intel in some pools; pin explicitly.
+    runs-on: macos-14
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode (latest-stable)
+        # Why: pins the Xcode toolchain across runner-image refreshes.
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Cache SwiftPM build + dependencies
+        # Why: .build and SwiftPM caches dominate cold-start time.
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Toolchain info
+        run: |
+          swift --version
+          xcodebuild -version
+          xcodebuild -showsdks | head -40
+
+      - name: swift build
+        run: swift build
+
+      - name: swift test
+        run: swift test
+
+      - name: mirrormesh-selftest
+        run: swift run mirrormesh-selftest
+
+      - name: mirrormesh-bench (demo scenario)
+        run: swift run mirrormesh-bench --scenario bench/scenarios/demo.json
+
+      - name: mirrormesh-verify (manifest)
+        # Why: bench writes a timestamped manifest; resolve newest match instead of relying on shell glob.
+        run: |
+          MANIFEST="$(ls -1t bench/out/demo_*.manifest.json | head -1)"
+          if [ -z "$MANIFEST" ]; then
+            echo "::error::No demo manifest produced by bench"
+            exit 1
+          fi
+          echo "Verifying: $MANIFEST"
+          swift run mirrormesh-verify --manifest "$MANIFEST"
+
+      - name: Summarize JSONL trace
+        run: |
+          TRACE="$(ls -1t bench/out/demo_*.jsonl | head -1)"
+          if [ -z "$TRACE" ]; then
+            echo "::error::No demo JSONL trace produced by bench"
+            exit 1
+          fi
+          echo "Summarizing: $TRACE"
+          python3 bench/scripts/summarize.py "$TRACE"
+
+      - name: Upload bench artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-out-${{ github.run_id }}
+          path: bench/out/
+          if-no-files-found: warn
+          retention-days: 14

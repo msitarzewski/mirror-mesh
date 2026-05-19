@@ -1,0 +1,104 @@
+# MirrorMesh — xcodegen spec
+#
+# Run `xcodegen generate` to produce `MirrorMesh.xcodeproj`. The .xcodeproj is
+# gitignored — this `project.yml` is the source of truth.
+#
+# The Xcode project wraps the SwiftPM package as a local dependency so the .app
+# bundle gets all libraries (Core, Capture, Vision, Solver, Render, Watermark,
+# Recorder, Output, AppKit). The bench/verify CLIs continue to be built via
+# `swift build` from the same Package.swift.
+
+name: MirrorMesh
+options:
+  bundleIdPrefix: ai.mirrormesh
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Automatic
+    OTHER_CODE_SIGN_FLAGS: --timestamp
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: -Onone
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: -O
+      SWIFT_COMPILATION_MODE: wholemodule
+
+configFiles:
+  Debug: MirrorMesh.xcconfig
+  Release: MirrorMesh.xcconfig
+
+packages:
+  MirrorMesh:
+    path: .
+
+targets:
+  MirrorMesh:
+    type: application
+    platform: macOS
+    sources:
+      - path: MirrorMesh
+        excludes:
+          - "*.entitlements"
+    dependencies:
+      - package: MirrorMesh
+        product: MirrorMeshAppKit
+      - package: MirrorMesh
+        product: MirrorMeshCore
+      - package: MirrorMesh
+        product: MirrorMeshOutput
+    info:
+      path: MirrorMesh/Info.plist
+      properties:
+        NSCameraUsageDescription: "MirrorMesh captures camera frames locally for realtime telepresence with watermarked output. No frames leave your device."
+        NSMicrophoneUsageDescription: "MirrorMesh transcribes microphone audio locally (Whisper.cpp). No audio leaves your device."
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        CFBundleDisplayName: MirrorMesh
+        CFBundleName: MirrorMesh
+        CFBundleIdentifier: ai.mirrormesh.MirrorMesh
+        CFBundleShortVersionString: "0.3.0-dev"
+        CFBundleVersion: "1"
+    entitlements:
+      path: MirrorMesh/MirrorMesh.entitlements
+      properties:
+        com.apple.security.device.camera: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.app-sandbox: false
+        # com.apple.developer.system-extension.install added in M24 when the
+        # virtual-camera target lands; that entitlement requires a real
+        # development cert and won't build with ad-hoc signing.
+    settings:
+      base:
+        PRODUCT_NAME: MirrorMesh
+        PRODUCT_BUNDLE_IDENTIFIER: ai.mirrormesh.MirrorMesh
+        MARKETING_VERSION: "0.3.0-dev"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: MirrorMesh/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MirrorMesh/MirrorMesh.entitlements
+        # DEVELOPMENT_TEAM / CODE_SIGN_IDENTITY come from Local.xcconfig (gitignored).
+        # Until the user pastes their Team ID into Local.xcconfig, signing is
+        # automatic-with-no-team, which builds for local debugging only.
+
+schemes:
+  MirrorMesh:
+    build:
+      targets:
+        MirrorMesh: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+    test:
+      config: Debug

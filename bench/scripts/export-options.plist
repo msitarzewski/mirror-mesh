@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WHY: Developer ID export options for `xcodebuild -exportArchive`.
+       Consumed by bench/scripts/notarize.sh. signingStyle=automatic so Xcode
+       picks the matching "Developer ID Application" cert from the login
+       keychain; teamID is left unset here and supplied via -exportOptionsPlist
+       merge or environment (see notarize.sh, which writes a per-run copy with
+       the DEVELOPMENT_TEAM substituted in).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>developer-id</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+    <key>destination</key>
+    <string>export</string>
+    <key>stripSwiftSymbols</key>
+    <true/>
+</dict>
+</plist>

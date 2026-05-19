@@ -1,0 +1,48 @@
+{
+  "consent" : {
+    "accepted_at" : "2026-05-19T18:31:56Z",
+    "scheme" : "self-as-source",
+    "user_disclosure_text_sha256" : "aa418533f2f5a1ddae21eec27b08b23b5e754ddb6944f60eaffa2e17a0595b67"
+  },
+  "device" : {
+    "chip" : "Apple M5 Max",
+    "memory_gb" : 128,
+    "model" : "Mac17,6",
+    "os_version" : "macOS 26.5.0"
+  },
+  "ended_at" : "2026-05-19T18:32:02Z",
+  "frame_count" : 120,
+  "manifest_signature_b64" : "itjfBSP6Tc7c7\/v2fsrVr8\/5oFY4h3jF5xLR2vJs0HHRF1fGK+aq26TmYl1QzeeaeYC1soBhYSXe4YNVdKBODQ==",
+  "manifest_version" : "1.0",
+  "models" : [
+
+  ],
+  "pipeline" : {
+    "capture" : {
+      "device_id" : "synthetic",
+      "format" : "640x360@30"
+    },
+    "landmarks" : {
+      "backend" : "synthetic",
+      "smoothing" : "one-euro"
+    },
+    "render" : {
+      "overlay" : [
+        "landmarks",
+        "avatar_mask"
+      ]
+    },
+    "solver" : {
+      "calibration_frames" : 30,
+      "type" : "geometric"
+    },
+    "watermark" : {
+      "audible_chirp" : false,
+      "signed" : true,
+      "visible" : true
+    }
+  },
+  "public_key_b64" : "HxB4oxaZYUQkNil0jBuGtoOE7ncad1dIjPrqgwUIFOo=",
+  "session_id" : "FA26E0D9-6651-4C23-A87D-5250D3EF796A",
+  "started_at" : "2026-05-19T18:31:56Z"
+}

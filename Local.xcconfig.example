@@ -1,0 +1,19 @@
+// Local.xcconfig.example — copy to Local.xcconfig (gitignored) and fill in.
+//
+// Local.xcconfig is included by MirrorMesh.xcconfig. None of these values are
+// secret in themselves (the Team ID is not a credential); the file is
+// gitignored only so per-developer values don't conflict in PRs.
+
+// Apple Developer Team ID (10-char alphanumeric).
+// Xcode → Settings → Accounts → your Apple ID → highlight team → look at the
+// "Team ID" column in the lower table.
+DEVELOPMENT_TEAM = REPLACE_WITH_YOUR_TEAM_ID
+
+// Signing identity. For local development the default "Apple Development"
+// works. For distribution (Developer ID, outside the App Store):
+//   CODE_SIGN_IDENTITY = Developer ID Application: Your Name (TEAM_ID)
+CODE_SIGN_IDENTITY = Apple Development
+
+// Bundle ID — defaults to ai.mirrormesh.MirrorMesh in MirrorMesh.xcconfig.
+// Override here if you need a different one:
+// PRODUCT_BUNDLE_IDENTIFIER = com.yourdomain.MirrorMesh

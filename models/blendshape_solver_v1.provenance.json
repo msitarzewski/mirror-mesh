@@ -1,0 +1,24 @@
+{
+  "name": "blendshape_solver_v1",
+  "source": "models/training/blendshape_solver.py",
+  "license": "Apache-2.0 (training script and weights)",
+  "training_data_summary": "Synthetic. 10,000 training + 1,000 validation samples drawn from a canonical neutral 76-point landmark face perturbed along plausible expression axes (jaw open, smile/frown, eye blink, brow raise) plus per-point Gaussian jitter (std 0.001). Each sample is labelled with the same geometric rules implemented in Sources/MirrorMeshSolver/GeometricSolver.swift, so the model learns to mimic the geometric solver in a differentiable form. No human face data is used. No identifiable biometric data is touched.",
+  "conversion_pipeline": "torch.nn.Sequential -> torch.jit.trace -> coremltools.converters.convert(convert_to='mlprogram', target=macOS14) -> .mlpackage",
+  "architecture": "MLP: Linear(152, 64) -> ReLU -> Linear(64, 64) -> ReLU -> Linear(64, 52) -> Sigmoid",
+  "input_schema": "Float32 tensor of shape (1, 152). 76 landmark points as interleaved (x, y) in normalized image space [0, 1].",
+  "output_schema": "Float32 tensor of shape (1, 52). Coefficients in [0, 1] ordered by BlendshapeKey.allCases sorted ascending by rawValue.",
+  "training": {
+    "framework": "PyTorch 2.7.1",
+    "epochs": 50,
+    "batch_size": 256,
+    "optimizer": "Adam",
+    "learning_rate": 1e-3,
+    "loss": "MSE",
+    "seed": 42,
+    "final_val_mse": 0.013508
+  },
+  "size_bytes": 45056,
+  "sha256": "54bc16fe87ccf4cc2f29e6008fc77cf1fd977ec75a58ae27325a8ad5e936df54",
+  "sha256_algorithm": "Concatenated sha256 over each file in the .mlpackage directory, sorted by relative path. Each file's relative-path bytes are written, then a NUL byte, then the file contents. Implemented in models/training/blendshape_solver.py:sha256_of_path and verifiable via models/verify_provenance.py.",
+  "reproduction": "python3 -m pip install -r models/training/requirements.txt && python3 models/training/blendshape_solver.py"
+}

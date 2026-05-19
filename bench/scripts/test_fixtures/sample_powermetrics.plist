@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>elapsed_ns</key>
+	<integer>100000000</integer>
+	<key>hw_model</key>
+	<string>Mac17,6</string>
+	<key>thermal_pressure</key>
+	<string>Nominal</string>
+	<key>processor</key>
+	<dict>
+		<key>cpu_power</key>
+		<real>820.4</real>
+		<key>gpu_power</key>
+		<real>1240.1</real>
+		<key>ane_power</key>
+		<real>50.2</real>
+		<key>package_power</key>
+		<real>2110.7</real>
+	</dict>
+</dict>
+</plist>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>elapsed_ns</key>
+	<integer>200000000</integer>
+	<key>hw_model</key>
+	<string>Mac17,6</string>
+	<key>thermal_pressure</key>
+	<string>Nominal</string>
+	<key>processor</key>
+	<dict>
+		<key>cpu_power</key>
+		<real>915.0</real>
+		<key>gpu_power</key>
+		<real>1180.0</real>
+		<key>ane_power</key>
+		<real>48.0</real>
+		<key>package_power</key>
+		<real>2143.0</real>
+	</dict>
+</dict>
+</plist>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>elapsed_ns</key>
+	<integer>300000000</integer>
+	<key>hw_model</key>
+	<string>Mac17,6</string>
+	<key>thermal_pressure</key>
+	<string>Nominal</string>
+	<key>processor</key>
+	<dict>
+		<key>cpu_power</key>
+		<real>1450.0</real>
+		<key>gpu_power</key>
+		<real>2100.0</real>
+		<key>ane_power</key>
+		<real>120.0</real>
+		<key>package_power</key>
+		<real>3520.0</real>
+	</dict>
+</dict>
+</plist>
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.

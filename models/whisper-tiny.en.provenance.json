@@ -1,0 +1,15 @@
+{
+  "name": "whisper-tiny.en",
+  "source": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+  "upstream_repo": "https://github.com/ggerganov/whisper.cpp",
+  "license": "MIT (whisper.cpp), MIT (OpenAI Whisper weights converted to ggml format)",
+  "training_data_summary": "OpenAI's original Whisper tiny.en model. Trained by OpenAI on 680,000 hours of multilingual and multitask supervised data collected from the web; the tiny.en variant is the smallest English-only checkpoint (~39 MB ggml format). No human face data, no biometric data. See https://github.com/openai/whisper for the upstream training description and https://arxiv.org/abs/2212.04356 for the paper.",
+  "conversion_pipeline": "openai/whisper PyTorch checkpoint -> ggerganov/whisper.cpp `models/convert-pt-to-ggml.py` -> ggml-tiny.en.bin (Float16). Re-quantized to q5_0 in the same upstream release pipeline.",
+  "architecture": "Encoder-decoder Transformer. 4 encoder layers, 4 decoder layers, 384-d hidden, 6 attention heads. ~39M parameters.",
+  "input_schema": "Float32 mono PCM at 16 kHz. Internally chunked to 30-second windows and converted to a log-Mel spectrogram by whisper.cpp.",
+  "output_schema": "Tokenized text per audio segment with start/end timestamps. The MirrorMesh `TranscriptFrame` wraps one such segment.",
+  "expected_sha256": "bd577a113a864445d4c299885e0cb97d4ba92b5f08c40bf06b3a3bbe5d3e75e7",
+  "approximate_file_size_bytes": 39000000,
+  "build_status": "v0.3.0 ships a mocked Whisper backend (see docs/voice-pipeline.md). The model file is NOT committed to the repo. To use the real backend (once linked in a future drop): download from the source URL above to ~/Library/Application Support/MirrorMesh/whisper-tiny.en.bin and verify the sha256.",
+  "privacy_note": "All transcription is local. No audio leaves the machine. Conforms to projectRules.md R3 (local-only on the inference hot path) and R4 (no cloud LLM/ML APIs as inference backends)."
+}

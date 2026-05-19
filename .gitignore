@@ -1,0 +1,46 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+Packages/
+Package.resolved
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+build/
+bench/out/*.jsonl
+!bench/out/.keep
+models/*.mlmodel
+models/*.mlmodelc
+models/*.mlpackage
+!models/.keep
+*.app/
+*.dSYM/
+*.session/
+sessions/
+
+# Xcode / xcodegen
+MirrorMesh.xcodeproj/
+build/
+Local.xcconfig
+/Local
+*.xcuserstate
+
+# External-repo symlinks (user's local Agent-Zero install — not portable to other clones)
+/AGENTS.md
+/CLAUDE.md
+
+# Notarization (M23) — Apple credentials and submission artifacts
+*.p8
+AuthKey_*.p8
+build/export/
+build/*.zip
+build/*.xcarchive/
+*.notarize.zip
+notarize-submit.log
+
+# Training logs (model training script produces these locally)
+/training.out
+/training.err

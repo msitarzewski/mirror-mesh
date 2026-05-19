@@ -1,0 +1,15 @@
+// MirrorMesh — shared, non-secret Xcode build settings.
+// User-specific or secret values (DEVELOPMENT_TEAM, signing identity) go in
+// Local.xcconfig (gitignored). See Local.xcconfig.example for the template.
+
+#include? "Local.xcconfig"
+
+// Common to all configurations
+ENABLE_HARDENED_RUNTIME = YES
+CODE_SIGN_STYLE = Automatic
+OTHER_CODE_SIGN_FLAGS = --timestamp
+
+// Default values; overridden by Local.xcconfig when present
+PRODUCT_BUNDLE_IDENTIFIER = ai.mirrormesh.MirrorMesh
+MARKETING_VERSION = 0.3.0-dev
+CURRENT_PROJECT_VERSION = 1

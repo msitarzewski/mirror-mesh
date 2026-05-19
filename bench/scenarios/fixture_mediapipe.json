@@ -1,0 +1,12 @@
+{
+  "name": "fixture_mediapipe",
+  "mode": "file",
+  "file": "Tests/Fixtures/face_synthetic_3s.mp4",
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "frames": 60,
+  "show_landmarks": true,
+  "show_avatar_mask": true,
+  "landmark": "mediapipe"
+}
