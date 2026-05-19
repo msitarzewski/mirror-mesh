@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """Train a tiny MLP that approximates the MirrorMesh GeometricSolver, then convert to CoreML.
 
 This script is *illustrative*. It is **not** invoked during `swift build` / `swift test`.

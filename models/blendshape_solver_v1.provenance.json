@@ -9,16 +9,21 @@
   "output_schema": "Float32 tensor of shape (1, 52). Coefficients in [0, 1] ordered by BlendshapeKey.allCases sorted ascending by rawValue.",
   "training": {
     "framework": "PyTorch 2.7.1",
+    "python": "3.11",
+    "coremltools": "8.3.0",
     "epochs": 50,
     "batch_size": 256,
     "optimizer": "Adam",
     "learning_rate": 1e-3,
     "loss": "MSE",
     "seed": 42,
-    "final_val_mse": 0.013508
+    "final_val_mse": 0.013523,
+    "trained_on": "2026-05-19"
   },
-  "size_bytes": 45056,
-  "sha256": "54bc16fe87ccf4cc2f29e6008fc77cf1fd977ec75a58ae27325a8ad5e936df54",
+  "size_bytes": 38789,
+  "sha256": "d26b2293baa87e220d8d550f225b028f714744936889b207140e360aacfcc38a",
   "sha256_algorithm": "Concatenated sha256 over each file in the .mlpackage directory, sorted by relative path. Each file's relative-path bytes are written, then a NUL byte, then the file contents. Implemented in models/training/blendshape_solver.py:sha256_of_path and verifiable via models/verify_provenance.py.",
-  "reproduction": "python3 -m pip install -r models/training/requirements.txt && python3 models/training/blendshape_solver.py"
+  "model_mlmodel_sha256": "3de1990c16651be8d36b20da9b87897f643bf2cc9ee81f3e167f4697de9cea13",
+  "model_mlmodel_sha256_note": "sha256 of the inner CoreML protobuf only (Data/com.apple.CoreML/model.mlmodel). Provided as a cross-check; the canonical 'sha256' above hashes the full .mlpackage directory layout.",
+  "reproduction": "KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 /opt/homebrew/bin/python3.11 models/training/blendshape_solver.py    # ~30s on Apple Silicon CPU. Python 3.11 used because coremltools 9.0 on Python 3.14 ships without the libmilstoragepython BlobWriter extension; coremltools 8.3 on Python 3.11 has the prebuilt extension and converts cleanly. The KMP/OMP env vars suppress a duplicate-OpenMP linker warning between numpy and libtorch."
 }

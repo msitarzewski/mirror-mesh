@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """Side-by-side P50/P95 diff of two mirrormesh-bench JSONL traces.
 
 Usage:

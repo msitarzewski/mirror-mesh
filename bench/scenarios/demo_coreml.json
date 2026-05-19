@@ -7,5 +7,6 @@
   "frames": 120,
   "show_landmarks": true,
   "show_avatar_mask": true,
-  "solver": "coreml"
+  "solver": "coreml",
+  "log_coefficients": true
 }

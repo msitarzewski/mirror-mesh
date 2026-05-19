@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """Re-hash the shipped .mlpackage and assert it matches the provenance sidecar.
 
 Used by CI per R5; runs without torch/coremltools. Exit 0 on match, 1 on mismatch.

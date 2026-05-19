@@ -161,7 +161,8 @@ public struct ContentView: View {
                 }
             } else {
                 Button {
-                    if viewModel.running { viewModel.stop() }
+                    // Why M37: do NOT stop the preview here — viewModel handles the handoff so
+                    // the user sees synthetic frames until the live pipeline emits its first one.
                     showConsent = true
                 } label: {
                     Label("Start Session", systemImage: "play.circle.fill")

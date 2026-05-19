@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """Summarize a mirrormesh-bench JSONL trace.
 
 Reads a JSONL file produced by `mirrormesh-bench` and prints per-stage P50/P95/P99

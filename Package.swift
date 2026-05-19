@@ -284,5 +284,12 @@ let package = Package(
             dependencies: ["MirrorMeshVoice", "MirrorMeshCore"],
             path: "Tests/MirrorMeshVoiceTests"
         ),
+
+        // ── AppKit view-model + settings (M37/M38) ──────────────────────
+        .testTarget(
+            name: "MirrorMeshAppKitTests",
+            dependencies: ["MirrorMeshAppKit", "MirrorMeshCore"],
+            path: "Tests/MirrorMeshAppKitTests"
+        ),
     ]
 )

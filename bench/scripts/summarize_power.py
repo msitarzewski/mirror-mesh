@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """Summarize a power JSONL produced by power_parse.py.
 
 Prints mean / P50 / P95 / max for each power rail (cpu, gpu, ane, package) in

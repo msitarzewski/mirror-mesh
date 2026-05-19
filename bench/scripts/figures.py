@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """Generate paper-ready figures from mirrormesh-bench JSONL traces.
 
 Outputs into `docs/figures/`:

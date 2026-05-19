@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """Parse `powermetrics --format plist` output into JSONL.
 
 `powermetrics -f plist -i 100` writes a stream of *separate* XML plist

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """Side-by-side latency comparison for two MirrorMesh JSONL traces.
 
 Reads two JSONL telemetry files (one per landmark backend) and prints a table of
