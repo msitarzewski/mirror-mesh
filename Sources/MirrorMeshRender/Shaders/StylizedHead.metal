@@ -137,7 +137,7 @@ fragment float4 stylized_head_fragment(
         float wf = clamp(u.wireframeAmount, 0.0, 1.0) * edgeFactor;
         finalRGB = mix(finalRGB, finalRGB + float3(0.20), wf);
     }
-    // Solid alpha — the CPU-side renderer uses additive alpha at the blend-state level so this
-    // composites over the camera passthrough without blasting away pixels.
-    return float4(finalRGB, 0.95);
+    // Translucent so the operator's face reads through the puppet in debug + mirror views.
+    // CPU-side blend state is standard source-over; this alpha controls the over-camera mix.
+    return float4(finalRGB, 0.72);
 }

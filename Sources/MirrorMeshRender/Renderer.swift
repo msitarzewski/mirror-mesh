@@ -182,6 +182,11 @@ public final class Renderer: @unchecked Sendable {
         // no-op (no identity loaded). The renderer is the only layer that touches the stylized
         // head's Metal pipeline — MirrorMeshReenact stays free of Metal imports.
         if let payload = payload {
+            // Style-dependent sizing: Wireframe is a debug overlay (small + translucent ghost
+            // alongside the operator's face + landmarks). Mirror / Mask use the head as the
+            // hero — it replaces the operator's face, so it needs to roughly match the face's
+            // bounding box.
+            stylizedHead.options.headScale = options.isWireframeStyle ? 0.40 : 1.10
             do {
                 try stylizedHead.encode(
                     into: enc,

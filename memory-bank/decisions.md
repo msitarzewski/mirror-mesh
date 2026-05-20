@@ -97,9 +97,36 @@ Restore real test targets (`.testTarget` with `import Testing`) in `Package.swif
 
 ---
 
+## 2026-05-20 — ADR-0015: License Simplification — AGPL-3.0-only, research-only posture
+
+**Status**: Approved (2026-05-20). Supersedes the dual-license portion of ADR-0014.
+**Context**: The maintainer clarified intent: this is a research project with no monetization plans, and the goal is to *prevent* anyone else from monetizing derivatives. The Commercial half of ADR-0014's dual license existed so the maintainer could grant per-deployment commercial exceptions to AGPL — but that affordance is unwanted. The Commercial half adds friction (LICENSE-COMMERCIAL.md, dual-license verbiage across README/paper/release notes, "contact for licensing" surface area) without serving any goal the maintainer actually has.
+**Decision**:
+
+1. **AGPL-3.0-only** as the single project license. Drop `LICENSE-COMMERCIAL.md`. The "A" already closes the SaaS loophole; AGPL alone serves the "I don't sell this AND nobody else can either" intent exactly. This is the original GNU design intent for AGPL.
+2. **Top-level `NOTICE.md`** stating the research-only posture in plain English so a casual reader doesn't have to parse the AGPL text to understand the project's stance.
+3. **Research-only model dependencies become accessible**. LivePortrait (blocked under ADR-0014 because InsightFace runtime weights are research-use-only) is now usable — the maintainer's research use satisfies that restriction. Swap LivePortrait in as the photoreal `.consentedThirdParty` backend; FOMM scaffolding is retained as a license-clean fallback.
+4. **DCO sign-off remains** on every commit. AGPL doesn't need a CLA, and DCO is the lightest sufficient attestation that contributions are owned by the contributor.
+
+Copyright holder remains **Michael Sitarzewski**. Project framing in README + paper + RELEASE_NOTES updates to "AGPL-3.0-only research project."
+
+**Alternatives considered**:
+- **Keep ADR-0014 dual license**: status quo. Carries Commercial offering signaling the maintainer never intends to honor. Confusing for anyone reading the project's intent.
+- **GPL-3.0 (no A)**: blocks closed-source distribution but lets competitors host derivatives as SaaS without sharing back. AGPL closes that loophole; preferred.
+- **Public domain / CC0**: gives away the right to prevent monetization. Opposite of the stated goal.
+
+**Consequences**:
+- LICENSE-COMMERCIAL.md deleted; LICENSE.md remains (AGPL-3.0 text).
+- README, RELEASE_NOTES_v1.0.0.md, paper/draft_v1.md license sections updated to "AGPL-3.0-only research project; no commercial use of this code or derivatives."
+- LivePortrait swap unblocked (separate ADR if it lands as the primary photoreal path; FOMM remains scaffolded as license-clean alternative).
+- `models/external/` may carry research-only model definitions now — provenance + license sidecars must clearly flag the research-only nature of any weights the user is expected to download.
+- Pre-existing commits in v0.4.0–v1.0.0 history that landed under "AGPL + Commercial" remain validly licensed under AGPL alone — dual-licensing is permissive at the maintainer's discretion, and unilateral simplification to one of the disjuncts is allowed.
+
+---
+
 ## 2026-05-19 — ADR-0014: License Pivot — AGPL-3.0 + Commercial (dual)
 
-**Status**: Approved (resolved 2026-05-19 at v0.4.0 kickoff). Supersedes the Apache-2.0 portion of ADR-0005.
+**Status**: Superseded by ADR-0015 on 2026-05-20. Original notes retained for history.
 **Context**: Apache-2.0 (chosen in v0.2.0) gave any third party the same commercial rights as the maintainer. With the project moving toward a distributable app and an eventual commercial offering, the maintainer needs to be the sole commercial-licensing party. Apache-2.0 cannot reach that outcome regardless of CLA — once shipped under Apache, the existing code is permanently free for commercial use.
 **Decision**: Dual-license the project:
 

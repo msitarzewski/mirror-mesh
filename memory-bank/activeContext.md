@@ -1,8 +1,14 @@
 # MirrorMesh — Active Context
 
-**Updated**: 2026-05-20 (end of finish-the-project loop)
-**Current state machine position**: `IDLE` (v1.0.0 ship-ready, blocked only on user-supplied notarization credentials)
-**Substate**: `IDLE`
+**Updated**: 2026-05-20 (post-ship-ready: ADR-0015 license simplification + LivePortrait unblock)
+**Current state machine position**: `BUILD` (license cleanup + LivePortrait swap in flight)
+**Substate**: `WAITING_TOOL` (2 agents dispatched: docs/license + LivePortrait vendor)
+
+---
+
+## License pivot — ADR-0015
+
+The maintainer clarified intent: research project, no monetization, want to prevent others from monetizing derivatives too. AGPL-3.0-only achieves this without the dual-license dance. ADR-0014's Commercial half is being dropped; LICENSE-COMMERCIAL.md is being deleted; NOTICE.md is being added; all docs (README, RELEASE_NOTES, paper) are being updated to single-license posture. LivePortrait is unblocked because its research-only InsightFace dependency is satisfied by the maintainer's research use.
 
 ---
 

@@ -64,10 +64,11 @@ struct AppSettingsPersistenceTests {
         #expect(settings.showAvatarMask == true)
         #expect(settings.watermarkVisible == true)
         #expect(settings.chirpEnabled == true)
-        // v0.7.0 / v0.8.0 defaults
-        #expect(settings.voiceEnabled == false)
+        // v0.7.0 / v0.8.0 "no gating": voice + translation default-on so the full demo flow is
+        // active on first launch. Backends fail-soft if permissions / Ollama unavailable.
+        #expect(settings.voiceEnabled == true)
         #expect(settings.voiceLocale == "en-US")
-        #expect(settings.translationEnabled == false)
+        #expect(settings.translationEnabled == true)
         #expect(settings.translationTargetLocale == "es-ES")
         #expect(settings.ollamaModel == "llama3.2:3b")
     }
@@ -107,12 +108,12 @@ struct AppSettingsPersistenceTests {
         defer { wipe(suite) }
 
         let first = AppSettings(suiteName: suite)
-        #expect(first.voiceEnabled == false)  // default off
-        first.voiceEnabled = true
+        #expect(first.voiceEnabled == true)  // v0.7.0 "no gating" default on
+        first.voiceEnabled = false
         UserDefaults(suiteName: suite)?.synchronize()
 
         let second = AppSettings(suiteName: suite)
-        #expect(second.voiceEnabled == true)
+        #expect(second.voiceEnabled == false)
     }
 
     @Test func voiceLocaleRoundTrips() async {
@@ -134,12 +135,12 @@ struct AppSettingsPersistenceTests {
         defer { wipe(suite) }
 
         let first = AppSettings(suiteName: suite)
-        #expect(first.translationEnabled == false)
-        first.translationEnabled = true
+        #expect(first.translationEnabled == true)  // v0.8.0 "no gating" default on
+        first.translationEnabled = false
         UserDefaults(suiteName: suite)?.synchronize()
 
         let second = AppSettings(suiteName: suite)
-        #expect(second.translationEnabled == true)
+        #expect(second.translationEnabled == false)
     }
 
     @Test func translationTargetLocaleRoundTrips() async {

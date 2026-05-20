@@ -2,7 +2,7 @@
 
 **Source**: `memory-bank/mision.md` (filename misspelled; canonical reference)
 **Status**: Framework initialized 2026-05-19
-**License intent**: Apache 2.0 or MIT (final selection pending — see `decisions.md`)
+**License**: **AGPL-3.0-only research project** (ADR-0015 supersedes ADR-0014 and ADR-0005). Research-only intent: the maintainer does not monetize this code, and AGPL's strong copyleft + network-use clause prevents anyone else from monetizing derivatives either.
 
 ---
 
@@ -80,7 +80,7 @@ This framing is socially defensible, technically rich, and academically novel.
 
 ## Open Questions (Routed to `decisions.md` as ADRs)
 
-- License choice (Apache 2.0 vs MIT)
+- License: AGPL-3.0-only (resolved 2026-05-20 via ADR-0015)
 - Watermarking scheme (visible-only vs cryptographic frame signing vs both)
 - Voice transform inclusion (timbre modification — defaults, disclosure model)
 - Distribution channel (Homebrew tap, signed DMG, App Store, source-only)

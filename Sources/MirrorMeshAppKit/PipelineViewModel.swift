@@ -99,6 +99,17 @@ public final class PipelineViewModel: ObservableObject {
         self.settings = settings ?? AppSettings()
         self.ringBuffer = RingBufferSink(capacity: ringBufferCapacity)
         for stage in StageID.allCases { histograms[stage] = LatencyHistogram() }
+
+        // v0.6.0+ "no gating" default: auto-provision a self-as-source ConsentedIdentity at
+        // first launch so the stylized 3D head pass is live without the user having to mint a
+        // .mmid via the CLI. R1 still holds — `self-as-source` is one of the three legitimate
+        // schemes; the user IS the source. Subsequent launches re-use the persisted bundle.
+        // Best-effort: if provisioning fails (rare), the app continues with no identity loaded
+        // and the user can still load one via the inspector.
+        if let (identity, png) = try? DefaultIdentityProvider.loadOrCreate() {
+            self.consentedIdentity = identity
+            self.identityPngData = png
+        }
     }
 
     /// Start the real pipeline in the requested mode. Defaults to `.live` (camera + Vision).
@@ -122,13 +133,24 @@ public final class PipelineViewModel: ObservableObject {
         // M53: seed the renderer with style-aware options so the very first frame respects the
         // current render style (no AvatarMask leak before applySettings() ticks).
         let initialOpts = rendererOptions(for: settings.renderStyle)
+        // v0.6.0+ "no gating": pass the auto-provisioned (or user-loaded) identity through so
+        // the stylized 3D head renders from frame one. Translation options are seeded from
+        // AppSettings; the pipeline turns the stage on after start() per `voiceEnabled` /
+        // `translationEnabled` (see post-launch hop below).
+        let translationOpts = translationOptionsFromSettings()
         let opts = PipelineOptions(
             mode: mode,
             captureWidth: 640,
             captureHeight: 360,
             fps: 30,
             maxFrames: nil,
-            rendererOptions: initialOpts
+            rendererOptions: initialOpts,
+            consentedIdentity: consentedIdentity,
+            consentedIdentityPNG: identityPngData,
+            voiceEnabled: false,            // turned on post-start via setVoiceEnabled
+            voiceLocale: settings.voiceLocale,
+            translationEnabled: false,      // turned on post-start via setTranslationEnabled
+            translationOptions: translationOpts
         )
         let newPipeline = Pipeline(options: opts, manifestURL: manifestURL, jsonlURL: nil)
 
@@ -200,6 +222,24 @@ public final class PipelineViewModel: ObservableObject {
         if !modeIsSynthetic && settings.chirpShouldBeAudible {
             chirp.playChirp()
         }
+
+        // v0.7.0 / v0.8.0 "no gating": auto-enable voice + translation per AppSettings as soon as
+        // the pipeline is up. The backends fail-soft — voice errors land in `voiceError`,
+        // translation errors land in `translationError`. Neither tears down the pipeline; the user
+        // sees what's working and what isn't via the inspector status rows.
+        if settings.voiceEnabled {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.setVoiceEnabled(true)
+            }
+        }
+        if settings.translationEnabled {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let opts = self.translationOptionsFromSettings()
+                await self.setTranslationEnabled(true, options: opts)
+            }
+        }
     }
 
     /// M58: read + verify a `.mmid` ConsentedIdentity bundle and publish the result. On
@@ -243,7 +283,11 @@ public final class PipelineViewModel: ObservableObject {
             await p?.setRendererOptions(opts)
             await p?.setWatermarkVisible(watermarkVisible)
         }
-        watermarkActive = watermarkVisible || settings.watermarkLockedInRelease
+        // Why: "Watermark active" tracks the cryptographic signing state (always on during a
+        // running session — release-locked, no off switch). The visible-badge composite is a
+        // separate toggle. Keeping the badge tied to `running` matches what's actually happening
+        // to the output frames; previously it could read "idle" even though signing was on.
+        watermarkActive = running
     }
 
     // MARK: - Voice / Translation bridge (v0.7.0 / v0.8.0)
@@ -611,9 +655,12 @@ public final class AppSettings: ObservableObject {
                 watermarkVisible: Bool = true,
                 renderStyle: RenderStyle = .wireframe,
                 chirpEnabled: Bool = true,
-                voiceEnabled: Bool = false,
+                // v0.7.0 / v0.8.0 "no gating": voice + translation default-on. Backends fail-soft
+                // when permissions / Ollama aren't available; the inspector status rows surface
+                // what's working. The user can flip these off at any time and the change persists.
+                voiceEnabled: Bool = true,
                 voiceLocale: String = "en-US",
-                translationEnabled: Bool = false,
+                translationEnabled: Bool = true,
                 translationTargetLocale: String = "es-ES",
                 ollamaModel: String = "llama3.2:3b",
                 suiteName: String? = "ai.mirrormesh") {

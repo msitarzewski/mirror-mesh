@@ -51,12 +51,17 @@ public final class StylizedHeadRenderer {
             tintHighlight: SIMD4<Float> = SIMD4(1.00, 0.78, 0.62, 1.0),  // warm peach
             tintShadow: SIMD4<Float>    = SIMD4(0.32, 0.30, 0.55, 1.0),  // cool indigo
             rimColor: SIMD4<Float>      = SIMD4(0.40, 0.90, 1.00, 0.75), // cyan rim
-            rimPower: Float = 2.6,
+            rimPower: Float = 2.2,
             lightDir: SIMD3<Float> = simd_normalize(SIMD3(-0.35, 0.65, 0.65)),
             style: Style = .filledWithWireframe,
-            wireframeAmount: Float = 0.35,
-            outlineFeatherPx: Float = 1.5,
-            headScale: Float = 0.55,
+            // v0.6+ tuning: wireframe overlay reads as facets/structure on the smooth lat-long
+            // sphere so the head doesn't look like a blob.
+            wireframeAmount: Float = 0.65,
+            outlineFeatherPx: Float = 1.4,
+            // Compact enough to coexist with the operator's face in Wireframe debug view; large
+            // enough to read as the puppet in Mirror / Mask styles. Anchored to the face bounding
+            // box, so this multiplier interacts with face size on screen.
+            headScale: Float = 0.32,
             headYOffset: Float = 0.0
         ) {
             self.tintHighlight = tintHighlight
