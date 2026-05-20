@@ -131,13 +131,15 @@ fragment float4 stylized_head_fragment(
     }
 
     // Filled (style 0) or filled+wireframe (style 2). Composite the wireframe on top of the
-    // filled surface at `wireframeAmount` strength.
+    // filled surface; brighter edge so the underlying lat-long topology reads as visible facets
+    // instead of vanishing into the gradient.
     float3 finalRGB = lit;
     if (u.style == 2u) {
         float wf = clamp(u.wireframeAmount, 0.0, 1.0) * edgeFactor;
-        finalRGB = mix(finalRGB, finalRGB + float3(0.20), wf);
+        // Push toward white at edges — much higher contrast than the previous +0.2 nudge.
+        finalRGB = mix(finalRGB, float3(1.0, 1.0, 1.0), wf * 0.85);
     }
     // Translucent so the operator's face reads through the puppet in debug + mirror views.
-    // CPU-side blend state is standard source-over; this alpha controls the over-camera mix.
-    return float4(finalRGB, 0.72);
+    // 0.82 gives a clear puppet read while keeping the camera passthrough visible underneath.
+    return float4(finalRGB, 0.82);
 }

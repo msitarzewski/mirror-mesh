@@ -182,11 +182,13 @@ public final class Renderer: @unchecked Sendable {
         // no-op (no identity loaded). The renderer is the only layer that touches the stylized
         // head's Metal pipeline — MirrorMeshReenact stays free of Metal imports.
         if let payload = payload {
-            // Style-dependent sizing: Wireframe is a debug overlay (small + translucent ghost
-            // alongside the operator's face + landmarks). Mirror / Mask use the head as the
-            // hero — it replaces the operator's face, so it needs to roughly match the face's
-            // bounding box.
-            stylizedHead.options.headScale = options.isWireframeStyle ? 0.40 : 1.10
+            // Style-dependent sizing. `headScale` is NDC-relative (the projection maps to the
+            // [-1, 1] envelope), not bbox-relative — so a value of 1.0 fills the entire viewport
+            // height. Calibrated for typical webcam framing (face ≈ 30-40% of frame):
+            //   Wireframe — tiny ghost preview that coexists with the operator's face + landmarks
+            //   Mirror    — head matches face size to act as a translucent replacement
+            //   Mask      — head slightly larger than face for hero presentation
+            stylizedHead.options.headScale = options.isWireframeStyle ? 0.18 : 0.42
             do {
                 try stylizedHead.encode(
                     into: enc,

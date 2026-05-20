@@ -36,26 +36,21 @@ from itertools import repeat
 
 def kp2gaussian(kp, spatial_size, kp_variance):
     """
-    Transform a keypoint into gaussian like representation
+    Transform a keypoint into gaussian like representation.
+
+    MirrorMesh ADR-0015 vendor patch: upstream built a `(1, 1, d, h, w, 3)`
+    grid and broadcast against `(bs, K, 1, 1, 1, 3)` — a rank-6 intermediate
+    that CoreML rejects. We collapse bs into the K dim (inference is bs=1)
+    so every tensor stays rank <= 5. Math is unchanged.
     """
-    mean = kp
-
-    coordinate_grid = make_coordinate_grid(spatial_size, mean)
-    number_of_leading_dimensions = len(mean.shape) - 1
-    shape = (1,) * number_of_leading_dimensions + coordinate_grid.shape
-    coordinate_grid = coordinate_grid.view(*shape)
-    repeats = mean.shape[:number_of_leading_dimensions] + (1, 1, 1, 1)
-    coordinate_grid = coordinate_grid.repeat(*repeats)
-
-    # Preprocess kp shape
-    shape = mean.shape[:number_of_leading_dimensions] + (1, 1, 1, 3)
-    mean = mean.view(*shape)
-
-    mean_sub = (coordinate_grid - mean)
-
-    out = torch.exp(-0.5 * (mean_sub ** 2).sum(-1) / kp_variance)
-
-    return out
+    K = kp.shape[1]
+    coordinate_grid = make_coordinate_grid(spatial_size, kp)                    # (d, h, w, 3) rank 4
+    kp_flat = kp.view(-1, 1, 1, 1, 3)                                           # (bs*K, 1, 1, 1, 3) rank 5
+    diff = coordinate_grid.unsqueeze(0) - kp_flat                               # (bs*K, d, h, w, 3) rank 5
+    sq = (diff * diff).sum(-1)                                                  # (bs*K, d, h, w) rank 4
+    out = torch.exp(-0.5 * sq / kp_variance)                                    # (bs*K, d, h, w) rank 4
+    # Restore (bs, K, d, h, w) — for bs=1 this is just an unsqueeze.
+    return out.view(1, K, *out.shape[1:])                                       # (1, K, d, h, w) rank 5
 
 
 def make_coordinate_grid(spatial_size, ref, **kwargs):
@@ -133,7 +128,15 @@ class UpBlock3d(nn.Module):
         self.norm = nn.BatchNorm3d(out_features, affine=True)
 
     def forward(self, x):
-        out = F.interpolate(x, scale_factor=(1, 2, 2))
+        # MirrorMesh ADR-0015 vendor patch: F.interpolate on rank-5 input
+        # lowers to `upsample_nearest3d`, which coremltools doesn't implement.
+        # Since the depth scale factor is 1 (no Z scaling), we fold D into the
+        # batch, do a standard rank-4 nearest upsample on (H, W), then unfold.
+        # Numerically equivalent; coremltools-friendly primitives.
+        B, C, D, H, W = x.shape
+        out = x.permute(0, 2, 1, 3, 4).reshape(B * D, C, H, W)
+        out = F.interpolate(out, scale_factor=2, mode='nearest')
+        out = out.reshape(B, D, C, H * 2, W * 2).permute(0, 2, 1, 3, 4)
         out = self.conv(out)
         out = self.norm(out)
         out = F.relu(out)

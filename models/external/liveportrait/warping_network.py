@@ -62,7 +62,13 @@ class WarpingNetwork(nn.Module):
         self.estimate_occlusion_map = estimate_occlusion_map
 
     def deform_input(self, inp, deformation):
-        return F.grid_sample(inp, deformation, align_corners=False)
+        # MirrorMesh ADR-0015 vendor patch: F.grid_sample lowers to mb.resample
+        # which is rank-4-only. The deformation field is rank-5 (Bx16x64x64x3)
+        # and the feature volume is rank-5 (Bx32x16x64x64); we use a manual
+        # trilinear shim that produces a numerically-equivalent result through
+        # coremltools-friendly primitives (clamp / floor / gather / lerp).
+        from .grid_sample_3d import grid_sample_3d
+        return grid_sample_3d(inp, deformation, align_corners=False)
 
     def forward(self, feature_3d, kp_driving, kp_source):
         if self.dense_motion_network is not None:

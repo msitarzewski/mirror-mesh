@@ -169,7 +169,11 @@ HUMAN_256 = {
         },
     },
     "generator": {
-        "upscale":          1,
+        # `human` checkpoint was trained with upscale=2 (PixelShuffle×2 over a
+        # 12-channel intermediate → 3-channel RGB at double res). The Sequential
+        # wrapper produces conv_img.0.weight in the state_dict; upscale=1 would
+        # produce conv_img.weight and fail to load. Output resolution: 512×512.
+        "upscale":          2,
         "block_expansion":  64,
         "max_features":     512,
         "out_channels":     64,

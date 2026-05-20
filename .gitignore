@@ -51,3 +51,8 @@ notarize-submit.log
 # Never commit these — they bind a real subject's PNG + signed disclosure.
 /*.mmid
 
+# Per-user conversion outputs from models/training/*.py. Sidecars are
+# regenerated when the user runs the conversion script with their weights.
+models/*.provenance.json
+**/__pycache__/
+
