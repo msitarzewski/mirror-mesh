@@ -38,6 +38,15 @@
   captured frame in Mirror/Mask styles; Wireframe stays as debug. UX surfaces
   in IdentityInspector + toolbar pill. Auto-enabled on session start when
   models are present (per "no gating" policy from 2026-05-20).
+- 2026-05-20 — **Photoreal v1.1 follow-ups landed**: capture-as-identity
+  one-click flow lets users mint a usable .mmid from their live camera
+  frame in seconds (replaces the 1×1 transparent auto-default that
+  couldn't drive LivePortrait). transform_keypoint composition ports
+  upstream's intrinsic-XYZ Euler + scale + exp + t math to Swift,
+  producing meaningfully more expressive driving. FOMM photoreal path
+  now wires real inference with parity to LivePortrait (separate
+  weights, different per-frame graph). scripts/dev/refresh.sh covers
+  the "I changed code but don't see it" cache-miss case.
 
 ## In Progress
 

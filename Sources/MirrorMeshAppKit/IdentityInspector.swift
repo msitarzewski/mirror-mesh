@@ -30,6 +30,10 @@ import MirrorMeshWatermark
 public struct IdentityInspector: View {
     @ObservedObject var viewModel: PipelineViewModel
 
+    /// True while a self-capture mint is in flight. Drives the inline spinner and
+    /// disables the button so the user can't double-fire.
+    @State private var capturing: Bool = false
+
     public init(viewModel: PipelineViewModel) {
         self.viewModel = viewModel
     }
@@ -45,6 +49,7 @@ public struct IdentityInspector: View {
                     .frame(maxWidth: .infinity)
             }
             .controlSize(.small)
+            captureAsIdentityButton
         } header: {
             Text("Identity")
         } footer: {
@@ -52,6 +57,64 @@ public struct IdentityInspector: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Capture-as-identity (v1.1.0)
+
+    /// Replaces the auto-provisioned 1×1 transparent default `.mmid` with a real head
+    /// crop from the live camera. This is what makes the photoreal pipeline render the
+    /// operator's *actual* face instead of generator noise on an empty source image.
+    ///
+    /// Disabled until a captured frame is available (i.e., a session is running).
+    /// While the mint is in flight `capturing == true`, the label swaps to a spinner +
+    /// "Capturing…" so the user can't double-fire. On success we hot-swap the new
+    /// identity into the running pipeline via `viewModel.refreshPhotorealIdentity()`.
+    @ViewBuilder
+    private var captureAsIdentityButton: some View {
+        Button {
+            triggerSelfCapture()
+        } label: {
+            HStack(spacing: 6) {
+                if capturing {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Capturing…")
+                } else {
+                    Image(systemName: "camera.viewfinder")
+                    Text("Capture as my identity")
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .controlSize(.small)
+        .disabled(capturing || viewModel.latestCapturedFrame == nil)
+        .help("Replaces the loaded identity with a 256×256 face crop from the live camera. Requires Mirror or live capture session running.")
+    }
+
+    /// Spawn the async self-capture task. We hop off the SwiftUI button action onto a
+    /// detached Task because Vision + CoreImage on a 720p frame can take several tens
+    /// of ms; blocking the main run loop would freeze the live preview during the call.
+    /// The task hops back to @MainActor before mutating `@Published` state.
+    private func triggerSelfCapture() {
+        guard let frame = viewModel.latestCapturedFrame else {
+            viewModel.identityVerificationError = "No live frame available. Start a session and face the camera."
+            return
+        }
+        capturing = true
+        Task { @MainActor in
+            defer { capturing = false }
+            do {
+                let (identity, png) = try await IdentitySelfCapture.mintFromFrame(frame)
+                viewModel.consentedIdentity = identity
+                viewModel.identityPngData = png
+                viewModel.identityVerificationError = nil
+                await viewModel.refreshPhotorealIdentity()
+            } catch let e as IdentitySelfCapture.CaptureError {
+                viewModel.identityVerificationError = e.description
+            } catch {
+                viewModel.identityVerificationError = "Capture failed: \(error)"
+            }
         }
     }
 

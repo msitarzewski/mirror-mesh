@@ -38,6 +38,21 @@ fileprivate let hasLivePortraitModels: Bool = {
     return true
 }()
 
+/// Twin of `hasLivePortraitModels` for the FOMM kind. Set MIRRORMESH_FOMM_MODELS_DIR to a
+/// directory containing the three FOMM `.mlpackage` files produced by
+/// `models/training/fomm_to_coreml.py`. As with the LP predicate, contributors with no
+/// FOMM weights can still `swift test` cleanly — the gated tests skip with a clear reason.
+fileprivate let hasFOMMModels: Bool = {
+    let env = ProcessInfo.processInfo.environment
+    guard let path = env["MIRRORMESH_FOMM_MODELS_DIR"] else { return false }
+    let dir = URL(fileURLWithPath: path)
+    for name in PhotorealBackend.modelFileNames(for: .fomm) {
+        let file = dir.appendingPathComponent(name)
+        if !FileManager.default.fileExists(atPath: file.path) { return false }
+    }
+    return true
+}()
+
 @Suite("PhotorealInference")
 struct PhotorealInferenceTests {
 
@@ -181,6 +196,163 @@ struct PhotorealInferenceTests {
         #expect(pixelSum(output) > 0)
     }
 
+    // MARK: - transformKeypoint determinism + sensitivity (pure unit, no models)
+
+    /// Verify `PhotorealBackend.transformKeypoint(...)` is deterministic: calling it twice
+    /// with the same `MotionOutputs` produces byte-identical results. This is the contract
+    /// the LP source-cache relies on (`prepareSource` calls transformKeypoint once, then the
+    /// hot path calls it again with different inputs — same inputs → same outputs guarantees
+    /// the cached source kp matches whatever a re-run would produce).
+    @Test("transformKeypoint is deterministic for identical inputs")
+    func transformKeypointDeterministic() throws {
+        let outputs = makeDeterministicMotionOutputs(seed: 0xC0FFEE)
+        let kp1 = try PhotorealBackend.transformKeypoint(motionOutputs: outputs)
+        let kp2 = try PhotorealBackend.transformKeypoint(motionOutputs: outputs)
+
+        // Shape (1, 21, 3) for both
+        #expect(kp1.shape.map { $0.intValue } == [1, 21, 3])
+        #expect(kp2.shape.map { $0.intValue } == [1, 21, 3])
+
+        // Byte-identical buffers
+        let n = 21 * 3
+        let p1 = kp1.dataPointer.bindMemory(to: Float32.self, capacity: n)
+        let p2 = kp2.dataPointer.bindMemory(to: Float32.self, capacity: n)
+        for i in 0..<n {
+            #expect(p1[i] == p2[i])
+        }
+    }
+
+    /// Verify that two different `MotionOutputs` (different pose / expression / translation
+    /// / scale / canonical kp) produce different transformed keypoints. Catches a regression
+    /// where the composition collapses to identity (e.g. R = I and t = 0 because of a logits-
+    /// to-degrees bug) and silently returns the canonical kp for every frame.
+    @Test("transformKeypoint produces distinct outputs for distinct motion inputs")
+    func transformKeypointSensitive() throws {
+        let a = makeDeterministicMotionOutputs(seed: 0xAAAA_AAAA)
+        let b = makeDeterministicMotionOutputs(seed: 0xBBBB_BBBB)
+
+        // Sanity: the two inputs must actually differ somewhere — otherwise the test would
+        // pass vacuously even for a constant-output transformKeypoint.
+        var inputsDiffer = false
+        for i in 0..<a.kp.count where a.kp[i] != b.kp[i] {
+            inputsDiffer = true
+            break
+        }
+        #expect(inputsDiffer)
+
+        let kpA = try PhotorealBackend.transformKeypoint(motionOutputs: a)
+        let kpB = try PhotorealBackend.transformKeypoint(motionOutputs: b)
+        let n = 21 * 3
+        let pa = kpA.dataPointer.bindMemory(to: Float32.self, capacity: n)
+        let pb = kpB.dataPointer.bindMemory(to: Float32.self, capacity: n)
+        var anyDiff = false
+        for i in 0..<n where pa[i] != pb[i] {
+            anyDiff = true
+            break
+        }
+        #expect(anyDiff)
+    }
+
+    /// `binsToDegree` should reproduce the standard LivePortrait/FOMX headpose-decode
+    /// formula. With a perfectly-peaked logit at index `i`, the output should be exactly
+    /// `i * 3 - 99` degrees (the softmax mass concentrates on bin `i`). LivePortrait's
+    /// 66-bin convention covers the range -99° (bin 0) to +96° (bin 65); bin 33 is 0°.
+    @Test("binsToDegree matches the LivePortrait headpose-decode convention")
+    func binsToDegreeFormula() throws {
+        func peaked(at idx: Int) -> [Float32] {
+            var v = [Float32](repeating: 0, count: 66)
+            v[idx] = 50.0  // dominant logit; softmax mass ~1 on this bin
+            return v
+        }
+        let lo  = PhotorealBackend.binsToDegree(peaked(at: 0))
+        let mid = PhotorealBackend.binsToDegree(peaked(at: 33))
+        let hi  = PhotorealBackend.binsToDegree(peaked(at: 65))
+        // Tolerance is loose because softmax with logit=50 still leaks ~exp(-50) mass to
+        // neighbors; values land within a hundredth of a degree of the analytic limit.
+        #expect(abs(lo  - (0 * 3.0 - 99.0))  < 0.1)   // -99
+        #expect(abs(mid - (33 * 3.0 - 99.0)) < 0.1)   //   0
+        #expect(abs(hi  - (65 * 3.0 - 99.0)) < 0.1)   // +96
+    }
+
+    /// `rotationMatrixXYZ` with all-zero angles should be the identity matrix; this is the
+    /// simplest sanity-check that the rotation composition is wired the right way around.
+    /// A more involved invariant (orthogonality: R^T R = I) is also worth covering for the
+    /// non-zero case, which catches sign-flips in the sin/cos terms.
+    @Test("rotationMatrixXYZ is identity at zero and orthogonal elsewhere")
+    func rotationMatrixIdentityAndOrthogonal() throws {
+        // Zero -> identity
+        let id = PhotorealBackend.rotationMatrixXYZ(pitch: 0, yaw: 0, roll: 0)
+        let identity: [Float32] = [
+            1, 0, 0,
+            0, 1, 0,
+            0, 0, 1,
+        ]
+        for i in 0..<9 {
+            #expect(abs(id[i] - identity[i]) < 1e-6)
+        }
+
+        // Non-zero -> orthogonal: R^T R should be the identity (within float epsilon)
+        let R = PhotorealBackend.rotationMatrixXYZ(pitch: 0.3, yaw: -0.4, roll: 0.2)
+        // Compute R^T R column by column
+        for i in 0..<3 {
+            for j in 0..<3 {
+                // (R^T R)[i,j] = sum_k R[k,i] * R[k,j]
+                var s: Float32 = 0
+                for k in 0..<3 {
+                    s += R[k * 3 + i] * R[k * 3 + j]
+                }
+                let expected: Float32 = (i == j) ? 1 : 0
+                #expect(abs(s - expected) < 1e-5)
+            }
+        }
+    }
+
+    // MARK: - FOMM gated end-to-end
+
+    /// FOMM end-to-end smoke: construct a backend with the FOMM `.mlpackage` files, drive a
+    /// gradient buffer through `reenact`, and verify the output is a well-formed 256×256
+    /// BGRA buffer with non-zero pixel content. Gated by `MIRRORMESH_FOMM_MODELS_DIR` —
+    /// mirrors the LP-equivalent above so contributors with no FOMM weights still `swift
+    /// test` cleanly.
+    @Test(
+        "FOMM reenact produces non-zero output with the source PNG as appearance",
+        .enabled(if: hasFOMMModels, "Requires FOMM .mlpackage set under MIRRORMESH_FOMM_MODELS_DIR")
+    )
+    func fommReenactProducesNonZeroOutput() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let path = env["MIRRORMESH_FOMM_MODELS_DIR"] else {
+            throw NSError(domain: "PhotorealInferenceTests", code: 10, userInfo: [
+                NSLocalizedDescriptionKey: "MIRRORMESH_FOMM_MODELS_DIR not set",
+            ])
+        }
+        let modelsDir = URL(fileURLWithPath: path)
+        let bundle = try makeSignedBundleWithRealPNG()
+
+        let backend = try await PhotorealBackend(
+            identity: bundle.identity,
+            pngBytes: bundle.png,
+            runtimeVersion: "0.6.0",
+            modelsDir: modelsDir,
+            kind: .fomm
+        )
+
+        let driver = try makeGradientPixelBuffer(width: 256, height: 256)
+        let output = try await backend.reenact(driver: driver)
+
+        // Structural shape: BGRA, 256x256.
+        #expect(CVPixelBufferGetWidth(output) == 256)
+        #expect(CVPixelBufferGetHeight(output) == 256)
+        #expect(CVPixelBufferGetPixelFormatType(output) == kCVPixelFormatType_32BGRA)
+
+        // Pixel content: not all-zero (generator must have produced something) and not
+        // byte-identical to the driver (no pass-through bug).
+        let outputSum = pixelSum(output)
+        #expect(outputSum > 0)
+        let driverBytes = readBGRABytes(driver)
+        let outputBytes = readBGRABytes(output)
+        #expect(driverBytes != outputBytes)
+    }
+
     // MARK: - Helpers
 
     private func requireModelsDir() throws -> URL {
@@ -191,6 +363,45 @@ struct PhotorealInferenceTests {
             ])
         }
         return URL(fileURLWithPath: path)
+    }
+
+    /// Build a deterministic `MotionOutputs` from a 64-bit seed using a stdlib-free linear
+    /// congruential generator. Each call with the same seed produces byte-identical fields;
+    /// different seeds produce structurally-different fields. Pure helper for the
+    /// transformKeypoint unit tests — no CoreML involved.
+    private func makeDeterministicMotionOutputs(seed: UInt64) -> PhotorealBackend.MotionOutputs {
+        var state = seed | 1  // LCG seed must be non-zero
+        func next() -> Float32 {
+            // Numerical Recipes LCG (Knuth) — perfectly adequate for tests
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            // Map upper 32 bits to a float in [-1, 1)
+            let u32 = UInt32(truncatingIfNeeded: state >> 32)
+            return Float32(Int32(bitPattern: u32)) / Float32(Int32.max)
+        }
+        let K = 21
+        let B = 66
+        var pitch = [Float32](); pitch.reserveCapacity(B)
+        var yaw   = [Float32](); yaw.reserveCapacity(B)
+        var roll  = [Float32](); roll.reserveCapacity(B)
+        for _ in 0..<B {
+            // Logits in roughly [-2, 2], like a real network's pre-softmax output
+            pitch.append(next() * 2)
+            yaw.append(next() * 2)
+            roll.append(next() * 2)
+        }
+        var t   = [Float32](); for _ in 0..<3       { t.append(next() * 0.1) }       // small translation
+        var exp = [Float32](); for _ in 0..<(K * 3) { exp.append(next() * 0.05) }    // small expression
+        var kp  = [Float32](); for _ in 0..<(K * 3) { kp.append(next() * 0.5) }      // canonical scale
+        let scale: Float32 = 1.0 + next() * 0.1                                       // ~1.0 ± 0.1
+        return PhotorealBackend.MotionOutputs(
+            pitchBins: pitch,
+            yawBins:   yaw,
+            rollBins:  roll,
+            t:         t,
+            exp:       exp,
+            scale:     scale,
+            kp:        kp
+        )
     }
 
     /// Makes a signed `ConsentedIdentity` bundle whose `source_png_sha256` binds to *real*

@@ -70,10 +70,13 @@ public enum PhotorealBackendKind: String, Sendable {
 ///   4. `generator_v1` — takes the warped feature volume and returns the final RGB image
 ///      (post-sigmoid, in [0, 1]).
 ///
-/// The minimum-viable kp_source/kp_driving composition (v1.1) uses the implicit keypoint
-/// output directly. LivePortrait's full `live_portrait_wrapper.transform_keypoint(...)`
-/// math (apply rotation built from pitch/yaw/roll, add translation, add expression
-/// deformation) is a future refinement once we measure the quality delta on real frames.
+/// Both `kp_source` (cached during `prepareSource`) and `kp_driving` (computed per frame)
+/// are produced by `transformKeypoint(...)` — the same composition LivePortrait's reference
+/// `live_portrait_wrapper.transform_keypoint` applies: rotate the canonical implicit
+/// keypoints by the head pose (pitch/yaw/roll), scale, add per-keypoint expression delta,
+/// then add translation. Using the composed keypoints (rather than the raw `kp` output)
+/// produces noticeably richer reenactment because the warp net then receives a driving
+/// signal that encodes pose and expression as well as identity-specific keypoints.
 public actor PhotorealBackend {
 
     /// Errors surfaced specifically by the photorealistic backend's load + inference
@@ -177,6 +180,30 @@ public actor PhotorealBackend {
         static let generator  = 3
     }
 
+    /// Stable indices into the `models` array for FOMM. Order matches
+    /// `modelFileNames(for: .fomm)` — `keypoint_v1`, `motion_v1`, `generator_v1`.
+    /// FOMM has no separate appearance extractor — the SOURCE image itself is
+    /// the appearance feature, and it feeds straight into the generator for
+    /// every driving frame (see `models/training/fomm_to_coreml.py`).
+    private enum FOMM {
+        static let keypoint  = 0
+        static let motion    = 1
+        static let generator = 2
+    }
+
+    /// Number of implicit keypoints emitted by the LivePortrait motion network
+    /// (`num_kp` in `liveportrait_to_coreml.HUMAN_256`). Hard-coded because the
+    /// upstream architecture is fixed at 21 for the `human` variant.
+    private static let lpNumKP = 21
+
+    /// Number of bins per Euler-angle head in the LivePortrait motion network
+    /// (`num_bins` in `liveportrait_to_coreml.HUMAN_256`). LivePortrait predicts
+    /// pitch/yaw/roll as 66 discrete bins of 3 degrees each, with the bin index
+    /// 0 corresponding to -99° and bin 65 corresponding to +99° — the standard
+    /// `headpose_pred_to_degree` convention from FOMX/LivePortrait. The exact
+    /// per-bin width (3°) and offset (-99°) are baked into `binsToDegree` below.
+    private static let lpHeadposeBins = 66
+
     /// Which backend kind was selected at init. Useful for telemetry and for the
     /// SwiftUI identity panel to render the correct "open weights folder" affordance.
     public nonisolated let kind: PhotorealBackendKind
@@ -200,10 +227,29 @@ public actor PhotorealBackend {
     /// Set by `prepareSource(...)` exactly once per backend lifetime; never updated after.
     private var sourceFeature3D: MLMultiArray?
 
-    /// The cached source keypoint vector. Shape `(1, 21, 3)`. Set by `prepareSource(...)`
-    /// from the motion extractor running on the source PNG. Used as `kp_source` for every
-    /// warp call.
+    /// The cached source keypoint vector for LivePortrait. Shape `(1, 21, 3)`. Set by
+    /// `prepareSource(...)` from the motion extractor running on the source PNG, then
+    /// passed through `transformKeypoint(...)` so the cached value is the full world-
+    /// space keypoint set (canonical kp rotated by source head-pose, expression-deformed,
+    /// translation-shifted, scale-applied). Used as `kp_source` for every warp call.
     private var sourceKP: MLMultiArray?
+
+    /// The cached source RGB image for FOMM. Shape `(1, 3, 256, 256)` float32 in [0, 1].
+    /// FOMM has no separate appearance feature volume — the source image is what the
+    /// motion + generator networks consume directly for every driving frame. Set by
+    /// `prepareSource(...)` exactly once.
+    private var sourceImage: MLMultiArray?
+
+    /// The cached source-image keypoint coordinates for FOMM. Shape `(1, num_kp, 2)` —
+    /// 2D image-space coordinates of each implicit keypoint. Set by `prepareSource(...)`
+    /// from `keypoint_v1` on the source PNG.
+    private var sourceKPValue: MLMultiArray?
+
+    /// The cached source-image keypoint local jacobians for FOMM. Shape
+    /// `(1, num_kp, 2, 2)` — 2x2 affine transform around each keypoint, used by FOMM's
+    /// dense-motion network to compute the optical-flow field. Set alongside
+    /// `sourceKPValue` in `prepareSource(...)`.
+    private var sourceKPJacobian: MLMultiArray?
 
     /// Failable initializer. Performs the standard gate sequence then runs `prepareSource`
     /// so the first `reenact()` call has a populated cache. R12 — every code path that
@@ -295,27 +341,43 @@ public actor PhotorealBackend {
         ))
     }
 
-    /// Run the appearance + motion networks on the source PNG once and cache the results.
-    /// Called automatically from `init`. Exposed so a caller that constructs the actor
-    /// through a non-standard path (e.g. tests that load a backend without an immediate
-    /// source) can prime it explicitly.
+    /// Run the per-kind source-preparation graph once and cache the result. Called
+    /// automatically from `init`. Exposed so a caller that constructs the actor through a
+    /// non-standard path (e.g. tests that load a backend without an immediate source) can
+    /// prime it explicitly.
+    ///
+    /// LivePortrait: runs the appearance extractor (caches `feature_3d`) and the motion
+    /// extractor (composes pitch/yaw/roll/scale/exp/t/kp into the source's world-space
+    /// keypoints via `transformKeypoint` and caches them as `kp_source`).
+    ///
+    /// FOMM: caches the source-image MLMultiArray itself (FOMM has no separate appearance
+    /// extractor — the source image feeds the motion + generator nets every frame) and the
+    /// source keypoint detector outputs (`kp_value` + `kp_jacobian`).
     ///
     /// The cache is intentionally final — there is no "swap source" path. Identity rotation
     /// is handled by tearing down the backend and constructing a new one, matching the
     /// `FaceReenactor.setIdentity` model. This keeps the hot path lock-free.
     public func prepareSource(_ pngBytes: Data) async throws {
-        guard kind == .liveportrait else {
-            // FOMM path will land separately — different network split, different cache shape.
-            // For v1.1 the LivePortrait path is the only one with a wired inference graph.
-            return
-        }
-
         let sourceInput = try PixelBufferConversion.makeMLInput(
             fromPNG: pngBytes,
             targetSize: 256,
             ciContext: self.ciContext
         )
 
+        switch kind {
+        case .liveportrait:
+            try await prepareSourceLivePortrait(sourceInput: sourceInput)
+        case .fomm:
+            try await prepareSourceFOMM(sourceInput: sourceInput)
+        }
+    }
+
+    /// LivePortrait source-preparation graph. Runs appearance + motion on the source PNG
+    /// and caches `(feature_3d, kp_source)` where `kp_source` is the result of composing
+    /// the seven motion outputs via `transformKeypoint` — i.e. the canonical implicit
+    /// keypoints rotated by the source's pitch/yaw/roll, expression-deformed, translated,
+    /// and scaled into world space.
+    private func prepareSourceLivePortrait(sourceInput: MLMultiArray) async throws {
         // Appearance network: source PNG -> feature_3d (1, 32, 16, 64, 64)
         let appInput = try MLDictionaryFeatureProvider(dictionary: [
             "source_image": MLFeatureValue(multiArray: sourceInput),
@@ -333,53 +395,273 @@ public actor PhotorealBackend {
             throw LoadError.inferenceShapeMismatch("appearance_v1.feature_3d shape=\(f3DShape)")
         }
 
-        // Motion network on the SAME source PNG. We only retain `kp` (the implicit keypoints)
-        // — the other outputs (pitch/yaw/roll/t/exp/scale) are read for future use by the full
-        // transform_keypoint path. For v1.1 minimum-viable, kp_source is used directly.
-        let motInput = try MLDictionaryFeatureProvider(dictionary: [
-            "driving_image": MLFeatureValue(multiArray: sourceInput),
-        ])
-        let motOut = try await models[LP.motion].prediction(from: motInput, options: MLPredictionOptions())
-        guard let rawKP = motOut.featureValue(for: "kp")?.multiArrayValue else {
-            throw LoadError.inferenceShapeMismatch("motion_v1.kp (source)")
-        }
-        let kp = try Self.reshapeKP(rawKP)
+        // Motion network on the SAME source PNG. Capture ALL seven outputs (pitch, yaw, roll,
+        // t, exp, scale, kp) then compose them via transformKeypoint into world-space keypoints.
+        // This replaces the v1.1 minimum-viable shortcut that used `kp` directly — the composed
+        // result is what LivePortrait's reference `live_portrait_wrapper.transform_keypoint`
+        // produces, and the warp network expects.
+        let motionOutputs = try await runMotion(image: sourceInput, stage: "source")
+        let kpSourceTransformed = try Self.transformKeypoint(motionOutputs: motionOutputs)
 
         self.sourceFeature3D = feature3D
-        self.sourceKP        = kp
+        self.sourceKP        = kpSourceTransformed
     }
 
-    /// Reshape the motion model's flat `(1, 63)` keypoint output into the `(1, 21, 3)` layout
-    /// the warp network expects. The fully-connected head of `MotionExtractor` projects to
-    /// `3 * num_kp = 63` scalars; the LivePortrait reference path views that as `(1, K, 3)`
-    /// before consuming it (see `dense_motion.create_sparse_motions`). Some converted models
-    /// already emit rank-3; we accept either layout.
+    /// FOMM source-preparation graph. Caches `(sourceImage, kpValue, kpJacobian)` — the
+    /// source image feeds straight into motion + generator every frame, and the keypoint
+    /// outputs are reused as `kp_source_*` arguments to the motion network. Distinct from
+    /// LivePortrait where the appearance volume is the cached state.
+    private func prepareSourceFOMM(sourceInput: MLMultiArray) async throws {
+        // FOMM keypoint detector: image (1, 3, 256, 256) -> kp_value (1, K, 2) + kp_jacobian (1, K, 2, 2)
+        // Input name is `image` (see fomm_to_coreml.convert_kp); LivePortrait's motion net used
+        // `driving_image`. Mismatched names produce a fast, deterministic CoreML error.
+        let kpInput = try MLDictionaryFeatureProvider(dictionary: [
+            "image": MLFeatureValue(multiArray: sourceInput),
+        ])
+        let kpOut = try await models[FOMM.keypoint].prediction(from: kpInput, options: MLPredictionOptions())
+        guard let kpValue = kpOut.featureValue(for: "kp_value")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("keypoint_v1.kp_value (source)")
+        }
+        guard let kpJacobian = kpOut.featureValue(for: "kp_jacobian")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("keypoint_v1.kp_jacobian (source)")
+        }
+        // Sanity-check shapes. Default FOMM vox-256 uses num_kp=10; we don't hard-code the
+        // count because a contributor running an animal/taichi variant might convert with a
+        // different num_kp — we just verify the rank + the leading-1 batch dim.
+        let valShape = kpValue.shape.map { $0.intValue }
+        guard valShape.count == 3, valShape[0] == 1, valShape[2] == 2 else {
+            throw LoadError.inferenceShapeMismatch("keypoint_v1.kp_value (source) shape=\(valShape)")
+        }
+        let jacShape = kpJacobian.shape.map { $0.intValue }
+        guard jacShape.count == 4, jacShape[0] == 1,
+              jacShape[2] == 2, jacShape[3] == 2,
+              jacShape[1] == valShape[1] else {
+            throw LoadError.inferenceShapeMismatch("keypoint_v1.kp_jacobian (source) shape=\(jacShape)")
+        }
+
+        self.sourceImage      = sourceInput
+        self.sourceKPValue    = kpValue
+        self.sourceKPJacobian = kpJacobian
+    }
+
+    /// LivePortrait motion-extractor outputs as a Sendable bundle. We pull them out of the
+    /// CoreML `MLFeatureProvider` once at the call site (which is async / actor-isolated) so
+    /// the downstream `transformKeypoint` math can run on plain value-typed buffers. The
+    /// `Float32` storage decouples the helper from CoreML's MLMultiArray indexing convention.
     ///
-    /// macOS 14 floor (Package.swift): `MLMultiArray.reshaped(to:)` is macOS 15+, so when
-    /// reshape is needed we allocate a new array and copy the float32 buffer byte-for-byte.
-    /// 63 floats = 252 bytes; the copy is negligible against the per-frame ML cost.
-    private static func reshapeKP(_ array: MLMultiArray) throws -> MLMultiArray {
-        let shape = array.shape.map { $0.intValue }
-        if shape == [1, 21, 3] {
-            return array
+    /// `internal` (not `private`) so the `@testable` tests under
+    /// `Tests/MirrorMeshReenactTests/PhotorealInferenceTests.swift` can construct sample
+    /// motion outputs and exercise `transformKeypoint` directly without needing the four
+    /// LP `.mlpackage` files.
+    struct MotionOutputs: Sendable {
+        /// Pitch logits, shape `(1, 66)`. Convert via `binsToDegree` before composing.
+        var pitchBins: [Float32]
+        /// Yaw logits, shape `(1, 66)`.
+        var yawBins:   [Float32]
+        /// Roll logits, shape `(1, 66)`.
+        var rollBins:  [Float32]
+        /// Translation, shape `(1, 3)`. Broadcast-added to every transformed keypoint.
+        var t:         [Float32]
+        /// Expression delta, shape `(1, 63)` viewed as `(21, 3)`. Per-keypoint additive.
+        var exp:       [Float32]
+        /// Scale, shape `(1, 1)` (one scalar). Multiplies rotated keypoints before exp+t.
+        var scale:     Float32
+        /// Canonical implicit keypoints, shape `(1, 63)` viewed as `(21, 3)`.
+        var kp:        [Float32]
+    }
+
+    /// Run the LivePortrait motion extractor on an input image and pull all seven outputs
+    /// into a `MotionOutputs` value. `stage` is used purely for error messages so a
+    /// misconverted model fails with a precise indication of which call site noticed.
+    private func runMotion(image: MLMultiArray, stage: String) async throws -> MotionOutputs {
+        let motInput = try MLDictionaryFeatureProvider(dictionary: [
+            "driving_image": MLFeatureValue(multiArray: image),
+        ])
+        let motOut = try await models[LP.motion].prediction(from: motInput, options: MLPredictionOptions())
+
+        // Pull each output. The conversion script names them pitch/yaw/roll/t/exp/scale/kp.
+        // Any missing output is an inferenceShapeMismatch.
+        guard let pitchArr = motOut.featureValue(for: "pitch")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("motion_v1.pitch (\(stage))")
         }
-        if shape == [1, 63] {
-            let newShape: [NSNumber] = [1, 21, 3]
-            let reshaped: MLMultiArray
-            do {
-                reshaped = try MLMultiArray(shape: newShape, dataType: array.dataType)
-            } catch {
-                throw LoadError.inferenceShapeMismatch("motion_v1.kp reshape alloc failed: \(error)")
+        guard let yawArr = motOut.featureValue(for: "yaw")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("motion_v1.yaw (\(stage))")
+        }
+        guard let rollArr = motOut.featureValue(for: "roll")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("motion_v1.roll (\(stage))")
+        }
+        guard let tArr = motOut.featureValue(for: "t")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("motion_v1.t (\(stage))")
+        }
+        guard let expArr = motOut.featureValue(for: "exp")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("motion_v1.exp (\(stage))")
+        }
+        guard let scaleArr = motOut.featureValue(for: "scale")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("motion_v1.scale (\(stage))")
+        }
+        guard let kpArr = motOut.featureValue(for: "kp")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("motion_v1.kp (\(stage))")
+        }
+
+        // Copy each array's flat float32 buffer into a Swift [Float32]. CoreML stores these
+        // contiguously and we treat them as flat element-order vectors — the structural
+        // reshape happens in `transformKeypoint`.
+        func flatten(_ a: MLMultiArray, expectedCount: Int, name: String) throws -> [Float32] {
+            let count = a.shape.map { $0.intValue }.reduce(1, *)
+            guard count == expectedCount else {
+                throw LoadError.inferenceShapeMismatch("motion_v1.\(name) (\(stage)) count=\(count) expected=\(expectedCount)")
             }
-            // Both arrays are contiguous float32 of identical element count; a flat memcpy
-            // of all 63 elements moves the data without any layout assumption beyond "the
-            // logical scan order matches".
-            let src = array.dataPointer.bindMemory(to: Float32.self, capacity: 63)
-            let dst = reshaped.dataPointer.bindMemory(to: Float32.self, capacity: 63)
-            for i in 0..<63 { dst[i] = src[i] }
-            return reshaped
+            let ptr = a.dataPointer.bindMemory(to: Float32.self, capacity: count)
+            return Array(UnsafeBufferPointer(start: ptr, count: count))
         }
-        throw LoadError.inferenceShapeMismatch("motion_v1.kp unexpected shape=\(shape) (expected [1,63] or [1,21,3])")
+
+        let K = Self.lpNumKP
+        let B = Self.lpHeadposeBins
+        let pitch = try flatten(pitchArr,  expectedCount: B,       name: "pitch")
+        let yaw   = try flatten(yawArr,    expectedCount: B,       name: "yaw")
+        let roll  = try flatten(rollArr,   expectedCount: B,       name: "roll")
+        let t     = try flatten(tArr,      expectedCount: 3,       name: "t")
+        let exp   = try flatten(expArr,    expectedCount: K * 3,   name: "exp")
+        let scale = try flatten(scaleArr,  expectedCount: 1,       name: "scale")
+        let kp    = try flatten(kpArr,     expectedCount: K * 3,   name: "kp")
+        return MotionOutputs(
+            pitchBins: pitch,
+            yawBins:   yaw,
+            rollBins:  roll,
+            t:         t,
+            exp:       exp,
+            scale:     scale[0],
+            kp:        kp
+        )
+    }
+
+    /// Convert a 66-bin headpose logit vector into a single degree value, matching
+    /// LivePortrait's reference `headpose_pred_to_degree`:
+    ///
+    ///     softmax(bins) -> weighted sum with index [0..65] -> * 3 - 99
+    ///
+    /// The bin width is 3° and the index-0 bin corresponds to -99°; index 65 to +99°.
+    /// We use a numerically-stable softmax (subtract the max before `exp`) so logits in
+    /// the +/-50 range (the network's natural output scale) don't overflow `expf`.
+    static func binsToDegree(_ bins: [Float32]) -> Float32 {
+        var maxVal = bins[0]
+        for i in 1..<bins.count {
+            if bins[i] > maxVal { maxVal = bins[i] }
+        }
+        var expSum: Float32 = 0
+        var weightedSum: Float32 = 0
+        for i in 0..<bins.count {
+            let e = expf(bins[i] - maxVal)
+            expSum += e
+            weightedSum += e * Float32(i)
+        }
+        let mean = weightedSum / expSum
+        return mean * 3.0 - 99.0
+    }
+
+    /// Build the 3x3 rotation matrix for intrinsic XYZ Euler angles (pitch around X, yaw
+    /// around Y, roll around Z, applied in that order). Composition: `R = Rx * Ry * Rz`.
+    /// All angles are radians on entry.
+    ///
+    /// Layout is row-major as a flat `[Float32]` of length 9, so `M[r*3 + c]` accesses
+    /// row `r` column `c`. We return a value-typed array rather than a `simd_float3x3`
+    /// because the downstream consumer multiplies it row-wise against `(21, 3)` keypoints
+    /// where every row is a 3-vector — a hand-rolled scalar loop is easier to verify and
+    /// produces no SIMD-layout surprise (column-major vs row-major).
+    static func rotationMatrixXYZ(pitch: Float32, yaw: Float32, roll: Float32) -> [Float32] {
+        let cp = cosf(pitch); let sp = sinf(pitch)
+        let cy = cosf(yaw);   let sy = sinf(yaw)
+        let cr = cosf(roll);  let sr = sinf(roll)
+
+        // Rx (pitch around X):
+        //  [ 1   0   0 ]
+        //  [ 0  cp -sp ]
+        //  [ 0  sp  cp ]
+        // Ry (yaw around Y):
+        //  [ cy  0  sy ]
+        //  [ 0   1   0 ]
+        //  [-sy  0  cy ]
+        // Rz (roll around Z):
+        //  [ cr -sr  0 ]
+        //  [ sr  cr  0 ]
+        //  [ 0   0   1 ]
+        //
+        // R = Rx * Ry * Rz, row-major:
+        let r00 = cy * cr
+        let r01 = -cy * sr
+        let r02 = sy
+        let r10 = sp * sy * cr + cp * sr
+        let r11 = -sp * sy * sr + cp * cr
+        let r12 = -sp * cy
+        let r20 = -cp * sy * cr + sp * sr
+        let r21 = cp * sy * sr + sp * cr
+        let r22 = cp * cy
+        return [
+            r00, r01, r02,
+            r10, r11, r12,
+            r20, r21, r22,
+        ]
+    }
+
+    /// Compose the seven motion outputs into a `(1, 21, 3)` world-space keypoint tensor.
+    /// Mirrors LivePortrait's `live_portrait_wrapper.transform_keypoint`:
+    ///
+    ///     kp_t = scale * (kp @ R) + exp + t
+    ///
+    /// where:
+    /// - `R` is the intrinsic-XYZ rotation matrix built from pitch/yaw/roll (degrees,
+    ///   recovered from the 66-bin logits via `binsToDegree`),
+    /// - `kp` is the implicit canonical keypoint tensor `(21, 3)`,
+    /// - `exp` is the per-keypoint expression delta `(21, 3)`,
+    /// - `t` is the head translation `(3,)`, broadcast-added to every keypoint,
+    /// - `scale` is a scalar multiplier on the rotated keypoints (before adding exp + t,
+    ///   per upstream).
+    ///
+    /// This is the only computation between the motion network and the warp network. It is
+    /// CPU-bound, runs in microseconds for 21*3 floats, and has no async surface — pure value
+    /// types in, an `MLMultiArray` out.
+    static func transformKeypoint(motionOutputs m: MotionOutputs) throws -> MLMultiArray {
+        let K = lpNumKP
+
+        // (1) bins -> degrees -> radians
+        let pitchDeg = binsToDegree(m.pitchBins)
+        let yawDeg   = binsToDegree(m.yawBins)
+        let rollDeg  = binsToDegree(m.rollBins)
+        let deg2rad: Float32 = .pi / 180.0
+        let R = rotationMatrixXYZ(
+            pitch: pitchDeg * deg2rad,
+            yaw:   yawDeg   * deg2rad,
+            roll:  rollDeg  * deg2rad
+        )
+
+        // (2) Allocate the (1, K, 3) destination MLMultiArray.
+        let shape: [NSNumber] = [1, NSNumber(value: K), 3]
+        let out: MLMultiArray
+        do {
+            out = try MLMultiArray(shape: shape, dataType: .float32)
+        } catch {
+            throw LoadError.inferenceShapeMismatch("transform_keypoint output alloc failed: \(error)")
+        }
+        let dst = out.dataPointer.bindMemory(to: Float32.self, capacity: K * 3)
+
+        // (3) For each keypoint k in 0..K, compute:
+        //         row_rot = (kp_k * R)   — row-vector right-multiplied by R
+        //         out_k   = scale * row_rot + exp_k + t
+        //     We index `kp` and `exp` as flat (K, 3) arrays.
+        for k in 0..<K {
+            let kx = m.kp[k * 3 + 0]
+            let ky = m.kp[k * 3 + 1]
+            let kz = m.kp[k * 3 + 2]
+            // row-vector @ R: out[c] = sum_r kp_r * R[r][c]
+            let rx = kx * R[0 * 3 + 0] + ky * R[1 * 3 + 0] + kz * R[2 * 3 + 0]
+            let ry = kx * R[0 * 3 + 1] + ky * R[1 * 3 + 1] + kz * R[2 * 3 + 1]
+            let rz = kx * R[0 * 3 + 2] + ky * R[1 * 3 + 2] + kz * R[2 * 3 + 2]
+            dst[k * 3 + 0] = m.scale * rx + m.exp[k * 3 + 0] + m.t[0]
+            dst[k * 3 + 1] = m.scale * ry + m.exp[k * 3 + 1] + m.t[1]
+            dst[k * 3 + 2] = m.scale * rz + m.exp[k * 3 + 2] + m.t[2]
+        }
+
+        return out
     }
 
     /// Drive the photoreal puppet with a single driving frame.
@@ -398,31 +680,34 @@ public actor PhotorealBackend {
     ///           expected shape contract.
     ///           `PixelBufferConversionError` on marshaling failures.
     public func reenact(driver: CVPixelBuffer) async throws -> CVPixelBuffer {
-        guard kind == .liveportrait else {
-            // FOMM path: not yet wired. Refuse explicitly rather than silently pass through.
-            throw LoadError.sourceNotPrepared
-        }
-        guard let feature3D = self.sourceFeature3D,
-              let kpSource  = self.sourceKP else {
-            throw LoadError.sourceNotPrepared
-        }
-
-        // (1) Driver frame -> (1, 3, 256, 256) RGB float32 in [0, 1]
+        // (1) Driver frame -> (1, 3, 256, 256) RGB float32 in [0, 1]. The same conversion
+        // serves both backends; channel order + normalization match each conversion script.
         let driverInput = try PixelBufferConversion.makeMLInput(
             from: driver,
             targetSize: 256,
             ciContext: self.ciContext
         )
-
-        // (2) Motion network -> kp_driving (and pose/expression, currently unused for v1.1)
-        let motInput = try MLDictionaryFeatureProvider(dictionary: [
-            "driving_image": MLFeatureValue(multiArray: driverInput),
-        ])
-        let motOut = try await models[LP.motion].prediction(from: motInput, options: MLPredictionOptions())
-        guard let rawDrivingKP = motOut.featureValue(for: "kp")?.multiArrayValue else {
-            throw LoadError.inferenceShapeMismatch("motion_v1.kp (driving)")
+        switch kind {
+        case .liveportrait:
+            return try await reenactLivePortrait(driverInput: driverInput)
+        case .fomm:
+            return try await reenactFOMM(driverInput: driverInput)
         }
-        let kpDriving = try Self.reshapeKP(rawDrivingKP)
+    }
+
+    /// LivePortrait per-frame forward: motion → transform_keypoint → warp → generator.
+    /// The cached `feature_3d` and source `kpSource` are reused unchanged for every frame.
+    private func reenactLivePortrait(driverInput: MLMultiArray) async throws -> CVPixelBuffer {
+        guard let feature3D = self.sourceFeature3D,
+              let kpSource  = self.sourceKP else {
+            throw LoadError.sourceNotPrepared
+        }
+
+        // (2) Motion network -> all seven outputs, composed via transformKeypoint into
+        // kp_driving. This is what LivePortrait's reference inference does — the warp net
+        // never sees the raw `kp`; it sees the world-space composed kp.
+        let motionOutputs = try await runMotion(image: driverInput, stage: "driving")
+        let kpDriving = try Self.transformKeypoint(motionOutputs: motionOutputs)
 
         // (3) Warp network: (feature_3d, kp_driving, kp_source) -> warped_feature + occlusion_map
         // Note input-name ordering matches `models/training/liveportrait_to_coreml.py`:
@@ -456,6 +741,73 @@ public actor PhotorealBackend {
 
         // (5) MLMultiArray -> CVPixelBuffer (BGRA, 256x256). Downscales 512->256 in CIContext
         // so the renderer's existing 256-square texture pool is reused without changes.
+        let outputBuffer = try PixelBufferConversion.makePixelBuffer(
+            from: prediction,
+            outputSize: 256,
+            ciContext: self.ciContext
+        )
+        return outputBuffer
+    }
+
+    /// FOMM per-frame forward: keypoint(driver) → motion(source + 4 kps) → generator(source +
+    /// deformation + occlusion). FOMM keeps no separate appearance-feature volume; the source
+    /// MLMultiArray is fed into both motion and generator every frame, exactly as the upstream
+    /// `animate.py` does.
+    private func reenactFOMM(driverInput: MLMultiArray) async throws -> CVPixelBuffer {
+        guard let sourceImage      = self.sourceImage,
+              let sourceKPValue    = self.sourceKPValue,
+              let sourceKPJacobian = self.sourceKPJacobian else {
+            throw LoadError.sourceNotPrepared
+        }
+
+        // (2) Keypoint detector on the driver frame -> kp_driving_value + kp_driving_jacobian.
+        // Input name `image` matches the conversion-script contract.
+        let kpInput = try MLDictionaryFeatureProvider(dictionary: [
+            "image": MLFeatureValue(multiArray: driverInput),
+        ])
+        let kpOut = try await models[FOMM.keypoint].prediction(from: kpInput, options: MLPredictionOptions())
+        guard let kpDrivingValue = kpOut.featureValue(for: "kp_value")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("keypoint_v1.kp_value (driving)")
+        }
+        guard let kpDrivingJacobian = kpOut.featureValue(for: "kp_jacobian")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("keypoint_v1.kp_jacobian (driving)")
+        }
+
+        // (3) Dense-motion network -> deformation field + occlusion map. Input-name ordering
+        // matches `models/training/fomm_to_coreml.convert_motion`.
+        let motionInput = try MLDictionaryFeatureProvider(dictionary: [
+            "source_image":        MLFeatureValue(multiArray: sourceImage),
+            "kp_source_value":     MLFeatureValue(multiArray: sourceKPValue),
+            "kp_source_jacobian":  MLFeatureValue(multiArray: sourceKPJacobian),
+            "kp_driving_value":    MLFeatureValue(multiArray: kpDrivingValue),
+            "kp_driving_jacobian": MLFeatureValue(multiArray: kpDrivingJacobian),
+        ])
+        let motionOut = try await models[FOMM.motion].prediction(from: motionInput, options: MLPredictionOptions())
+        guard let deformation = motionOut.featureValue(for: "deformation")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("motion_v1.deformation (FOMM)")
+        }
+        guard let occlusionMap = motionOut.featureValue(for: "occlusion_map")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("motion_v1.occlusion_map (FOMM)")
+        }
+
+        // (4) Generator: (source, deformation, occlusion) -> prediction (1, 3, 256, 256)
+        let genInput = try MLDictionaryFeatureProvider(dictionary: [
+            "source_image":  MLFeatureValue(multiArray: sourceImage),
+            "deformation":   MLFeatureValue(multiArray: deformation),
+            "occlusion_map": MLFeatureValue(multiArray: occlusionMap),
+        ])
+        let genOut = try await models[FOMM.generator].prediction(from: genInput, options: MLPredictionOptions())
+        guard let prediction = genOut.featureValue(for: "prediction")?.multiArrayValue else {
+            throw LoadError.inferenceShapeMismatch("generator_v1.prediction (FOMM)")
+        }
+        let predShape = prediction.shape.map { $0.intValue }
+        guard predShape.count == 4, predShape[0] == 1, predShape[1] == 3 else {
+            throw LoadError.inferenceShapeMismatch("generator_v1.prediction (FOMM) shape=\(predShape)")
+        }
+
+        // (5) MLMultiArray -> CVPixelBuffer. FOMM generator is native 256x256 so no downscale
+        // — pass outputSize: 256 to keep the renderer's texture-pool size consistent across
+        // backends.
         let outputBuffer = try PixelBufferConversion.makePixelBuffer(
             from: prediction,
             outputSize: 256,

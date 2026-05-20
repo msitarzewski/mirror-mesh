@@ -1,10 +1,10 @@
 # MirrorMesh — Active Context
 
-**Updated**: 2026-05-20 (photoreal live — LivePortrait inference + UX surfaces wired)
-**Current state machine position**: `BUILD` (M88/M89 in flight via 3 parallel agents; UX agent done)
-**Substate**: `WAITING_TOOL` (agents A + B finishing PhotorealBackend.reenact + PhotorealStage frame substitution)
+**Updated**: 2026-05-20 (v1.1 photoreal follow-ups landed — capture-as-identity, transform_keypoint, FOMM parity, refresh.sh)
+**Current state machine position**: `IDLE` (M88/M89 shipped; M90/M91/M92/M93 shipped via parallel agents A + B + scripts/docs cleanup)
+**Substate**: `IDLE`
 
-**Photoreal status**: Inspector row, toolbar pill, and reactive style subtitles landed. Auto-enabled on session start when the four LivePortrait mlpackages are present at `<repo>/models/`, `~/Library/Application Support/MirrorMesh/models/`, or the app bundle. See `docs/PHOTOREAL_QUICKSTART.md`.
+**Photoreal status**: Inspector row, toolbar pill, and reactive style subtitles live. Auto-enabled on session start when the four LivePortrait mlpackages are present at `<repo>/models/`, `~/Library/Application Support/MirrorMesh/models/`, or the app bundle. v1.1 follow-ups: capture-as-identity one-click flow (mints real-face .mmid from live frame), transform_keypoint composition for expressive driving, FOMM photoreal inference parity. See `docs/PHOTOREAL_QUICKSTART.md`. Dev cache-miss helper at `scripts/dev/refresh.sh`.
 
 ---
 

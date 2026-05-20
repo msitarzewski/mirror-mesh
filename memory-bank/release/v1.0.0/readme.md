@@ -19,6 +19,10 @@
 | **M87** | Demo video for README header | ⚪ post-1.0 |
 | **M88** | Photoreal inference wiring (LivePortrait CoreML graph) | ✅ |
 | **M89** | Photoreal UX feedback (inspector + toolbar pill + subtitles) | ✅ |
+| **M90** | Capture-as-identity UX (mint .mmid from live frame) | ✅ |
+| **M91** | transform_keypoint composition for expressive driving | ✅ |
+| **M92** | FOMM photoreal inference parity (kind: .fomm) | ✅ |
+| **M93** | scripts/dev/refresh.sh clean-rebuild helper | ✅ |
 
 ## Exit criteria
 

@@ -45,6 +45,10 @@ v1.0.0  ✅  Ship-ready         — RELEASE_NOTES + README; notarization scripts
 cd /Users/michael/Clean/mirror-mesh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
+# 0) Clean state — if you've been iterating and want a guaranteed-fresh app.
+#    Wipes SwiftPM cache, rebuilds, kills any running instance, relaunches.
+./scripts/dev/refresh.sh
+
 # 1) The app — stylized head, consent flow, watermark, chirp
 swift run mirrormesh-app
 
@@ -69,7 +73,7 @@ swift run mirrormesh-bench bench/scenarios/fixture.json
 - **Notarization** — blocked on user-paste of `DEVELOPMENT_TEAM` Team ID. Scripts are at `scripts/release/{archive,notarize}.sh`; template at `Local.xcconfig.template`; recipe at `scripts/release/README.md`.
 - **App Store Connect API key** — needed by `xcrun notarytool store-credentials mirrormesh-notary` once Team ID lands
 - **GitHub remote** — no remote configured; `gh release create v1.0.0` is a one-liner once the remote URL exists
-- **LivePortrait photoreal weights** — optional, the photoreal substitution path. If `<repo>/models/{appearance,motion,warp,generator}_v1.mlpackage` are present the app auto-detects them and the Identity inspector flips to "Photoreal: ON" with a toolbar pill; otherwise the stylized head from v0.6.0 keeps rendering. Conversion: `python3.11 models/training/liveportrait_to_coreml.py --weights <hf-download-dir> --out models/`. Full recipe: `docs/PHOTOREAL_QUICKSTART.md`.
+- **LivePortrait photoreal weights** — optional, the photoreal substitution path. If `<repo>/models/{appearance,motion,warp,generator}_v1.mlpackage` are present the app auto-detects them and the Identity inspector flips to "Photoreal: ON" with a toolbar pill; otherwise the stylized head from v0.6.0 keeps rendering. Conversion: `python3.11 models/training/liveportrait_to_coreml.py --weights <hf-download-dir> --out models/`. Full recipe: `docs/PHOTOREAL_QUICKSTART.md`. **Recommended first step once mlpackages are in place**: in the Identity inspector, click "Capture as my identity" to mint a real-face .mmid from your live camera frame — the auto-provisioned default is a 1×1 transparent PNG that can't drive LivePortrait.
 - **Reenact-active bench number** — paper Table 4 has the pass-through baseline (3.07 ms); the reenact-active cell awaits a `mirrormesh-bench --identity <.mmid>` flag (v1.1 follow-up)
 - **Power benches** — `bench/scripts/power.sh` requires sudo, headless run is pending
 

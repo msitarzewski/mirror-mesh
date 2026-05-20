@@ -297,6 +297,11 @@ public final class PipelineViewModel: ObservableObject {
             self.consentedIdentity = identity
             self.identityPngData = png
             self.identityVerificationError = nil
+            // v1.1.0: push the verified identity into the running pipeline so the
+            // photoreal stage reloads with the new source PNG. If no pipeline is
+            // running (yet) the helper is a no-op and the start() path will pick it
+            // up from `options.consentedIdentity` on cold start.
+            Task { [weak self] in await self?.refreshPhotorealIdentity() }
         } catch let e as ConsentedIdentityError {
             self.consentedIdentity = nil
             self.identityPngData = nil
@@ -305,6 +310,34 @@ public final class PipelineViewModel: ObservableObject {
             self.consentedIdentity = nil
             self.identityPngData = nil
             self.identityVerificationError = "Failed to read bundle: \(error)"
+        }
+    }
+
+    /// Hot-swap the currently-loaded `consentedIdentity` into the live Pipeline so
+    /// the photoreal stage reloads with the new source. Called by `IdentityInspector`
+    /// after a successful self-capture mint and by `loadIdentity(from:)` after a
+    /// fresh bundle verifies. No-op when nothing is loaded or no pipeline is running.
+    ///
+    /// When photoreal is currently active, we cycle the stage (off → on) so it
+    /// re-runs `prepareSource()` against the new PNG. Without the cycle the cached
+    /// appearance feature volume would still reflect the previous source — exactly
+    /// the bug this whole task closes.
+    ///
+    /// `setConsentedIdentity` already propagates through to the photoreal stage
+    /// internally (see `Pipeline.swift:setConsentedIdentity`), so the cycle is only
+    /// needed to force a clean re-prepare of the appearance cache. Belt-and-braces.
+    public func refreshPhotorealIdentity() async {
+        guard let id = consentedIdentity, let png = identityPngData else { return }
+        guard let p = pipeline else { return }
+        do {
+            try await p.setConsentedIdentity(id, pngBytes: png)
+            // If photoreal is currently active, cycle it so the appearance cache rebuilds.
+            if photorealAvailable && photorealActive {
+                await setPhotorealEnabled(false)
+                await setPhotorealEnabled(true)
+            }
+        } catch {
+            photorealError = "Identity hot-swap failed: \(error)"
         }
     }
 
