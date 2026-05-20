@@ -15,7 +15,7 @@
 | **M83** | GitHub release artifact assembly (signed .app.zip + dSYM) | ⚪ blocked on M81 |
 | **M84** | Homebrew tap (`brew install msitarzewski/mirrormesh/mirrormesh`) | ⚪ blocked on M83 |
 | **M85** | DCO + CONTRIBUTING.md final | ⚪ |
-| **M86** | License files final (AGPL-3.0 + Commercial dual + DCO) | ⚪ |
+| **M86** | License files final (AGPL-3.0-only + DCO + NOTICE.md per ADR-0015) | ✅ |
 | **M87** | Demo video for README header | ⚪ post-1.0 |
 
 ## Exit criteria

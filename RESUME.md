@@ -13,7 +13,7 @@ Measured P50 latency on M5 Max:
 
 **176 tests / 34 suites green** under `swift test`. `swift build` clean across all 17 modules + 10 CLIs. Hardware: M5 Max / 128 GB / 40 GPU cores.
 
-**License**: AGPL-3.0 + Commercial dual. Copyright "Michael Sitarzewski". DCO sign-off on commits.
+**License**: AGPL-3.0-only research project (ADR-0015 supersedes ADR-0014). Copyright "Michael Sitarzewski". DCO sign-off on commits. See `NOTICE.md`.
 
 ## Where we are in the release arc
 

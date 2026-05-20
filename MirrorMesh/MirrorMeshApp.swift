@@ -63,7 +63,7 @@ struct MirrorMeshAppEntryPoint: App {
             CommandGroup(replacing: .help) {
                 Button("MirrorMesh Documentation") { openDocs() }
                 Button("Project License (AGPL-3.0)") { openLicense() }
-                Button("Commercial License") { openCommercial() }
+                Button("Research Notice") { openNotice() }
             }
         }
     }
@@ -73,15 +73,15 @@ struct MirrorMeshAppEntryPoint: App {
     private func showAboutPanel() {
         NSApplication.shared.orderFrontStandardAboutPanel(options: [
             .applicationName: "MirrorMesh",
-            .applicationVersion: "0.4.0-dev",
+            .applicationVersion: "1.0.0-dev",
             .credits: NSAttributedString(
                 string: "Open realtime telepresence research for Apple Silicon.\n\n"
                       + "Local-only inference. Watermarked by default. Consent-gated by design.\n\n"
-                      + "AGPL-3.0 + Commercial dual-licensed.",
+                      + "AGPL-3.0-only research project. No commercial use.",
                 attributes: [.foregroundColor: NSColor.labelColor]
             ),
             NSApplication.AboutPanelOptionKey(rawValue: "Copyright"):
-                "© 2026 Michael Sitarzewski. AGPL-3.0 or commercial — see LICENSE / COMMERCIAL.md."
+                "© 2026 Michael Sitarzewski. AGPL-3.0 — see LICENSE and NOTICE.md."
         ])
     }
 
@@ -122,9 +122,17 @@ struct MirrorMeshAppEntryPoint: App {
         }
     }
 
-    private func openCommercial() {
-        if let url = URL(string: "mailto:msitarzewski@gmail.com?subject=MirrorMesh%20commercial%20license%20inquiry") {
-            NSWorkspace.shared.open(url)
+    private func openNotice() {
+        let candidates = [
+            FileManager.default.currentDirectoryPath + "/NOTICE.md",
+            "/Users/michael/Clean/mirror-mesh/NOTICE.md",
+        ]
+        for path in candidates {
+            let url = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: url.path) {
+                NSWorkspace.shared.open(url)
+                return
+            }
         }
     }
 }

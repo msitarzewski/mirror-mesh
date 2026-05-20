@@ -8,7 +8,7 @@ author:
 date: 2026-05-20
 venue: "Submitted to ACM ASSETS (primary); CHI (alternate)"
 license-of-paper: "CC BY 4.0"
-license-of-software: "AGPL-3.0-or-later + separate commercial"
+license-of-software: "AGPL-3.0-only (research project)"
 status: "Draft v1 — pre-camera-ready"
 keywords:
   - synthetic media provenance
@@ -60,7 +60,7 @@ pilot design** for multilingual visual lip-sync, gaze correction, and
 expression amplification for users with facial paralysis. The complete
 implementation — capture, vision, solver, reenactor, watermarker, recorder,
 virtual camera, voice transcription, and the consent-protocol verifier — is
-released under AGPL-3.0 with a separate commercial track.
+released under AGPL-3.0-only as a research project (ADR-0015).
 
 **Keywords**: synthetic media provenance, facial reenactment, consent protocol,
 accessibility, Apple Silicon, watermarking, C2PA, realtime telepresence,
@@ -139,14 +139,13 @@ conversion is tractable, and its M-series inference budget is well-characterized
 
 LivePortrait [@liu2024liveportrait] improves expressiveness and identity
 preservation versus FOMM through stitching and retargeting modules, with
-particular gains on extreme expressions. We do *not* incorporate LivePortrait
-in the shipped stack: at the time of writing the upstream repository's license
-remains "research only" and incorporates InsightFace components under
-licensing terms incompatible with AGPL-3.0 plus a separate commercial track.
-The architectural slot for LivePortrait exists (`PhotorealBackend` is a
-protocol with one implementation; see
-`Sources/MirrorMeshReenact/PhotorealBackend.swift:29`) and would be filled by
-a downstream contributor if the license clarifies.
+particular gains on extreme expressions. At v1.0.0 LivePortrait is the
+recommended photoreal backend (`PhotorealBackend.swift`, `kind: .liveportrait`);
+its dependency on InsightFace runtime components — which carry a research-only
+restriction — is satisfied by MirrorMesh's research-only posture under
+ADR-0015 (`memory-bank/decisions.md`). FOMM remains shipped as a fully
+license-clean fallback for downstream uses where even the research-only
+InsightFace restriction is unacceptable.
 
 Thies et al.'s Face2Face [@thies2016face2face] established the realtime monocular
 reenactment paradigm before deep learning fully took over; we cite it for
@@ -250,7 +249,7 @@ Our design principles:
 | Disclosure is many-layered so single failures degrade gracefully | Visible badge + per-frame Ed25519 + manifest + audible chirp (Section 4.4–4.7) |
 | The dangerous path is annoying; the safe path is convenient | CLI for third-party bundles requires verbatim consent phrase (Section 4.3) |
 | Defaults are policy; release builds lock defaults on | `#if !DEBUG` enforcement of watermark visibility, chirp, and signing |
-| Open source so the architecture is inspectable | AGPL-3.0 + DCO; source-shipping `.app` |
+| Open source so the architecture is inspectable | AGPL-3.0-only + DCO; source-shipping `.app` |
 | No license-only constraints | Constraints are architectural; license is for sustainability |
 
 Adversary A is defeated at the load gate (no signed bundle, no reenactment).
@@ -898,19 +897,18 @@ disabled in release builds, the `FaceReenactor` refuses to initialize without
 a verified bundle, the `mirrormesh-consent` CLI refuses to issue a
 third-party bundle without an explicit consent phrase.
 
-### 8.3 Dual-License Posture
+### 8.3 License Posture
 
-The shipped license is AGPL-3.0 plus a separate commercial track:
-
-- **AGPL-3.0** covers researchers, academics, hobbyists, internal tools,
-  and AGPL-compatible derivatives.
-- **Commercial license** is available from the maintainer for closed-source
-  or SaaS deployments that cannot satisfy AGPL's source-availability or
-  §13 SaaS-loophole terms.
-
-Every commercial license retains the architectural invariants of the
-trust layer as contractual obligations. The constraints are not removable
-through the commercial relationship; they are the project's contribution.
+The shipped license is **AGPL-3.0-only**, research-project posture
+(`memory-bank/decisions.md`, ADR-0015 supersedes ADR-0014). The earlier
+v0.4.0 AGPL-3.0 + Commercial dual is dropped at v1.0.0: the maintainer
+does not monetize this code, and there is no commercial sublicense
+available from any party. AGPL-3.0 by itself serves both halves of that
+stance — its strong copyleft survives forking, and its §13 network-use
+clause closes the SaaS loophole. The project's architectural
+contributions (consent bundles, watermarking, refuse-on-sight features)
+are enforced by the code itself, not by the license, and survive any
+licensing scenario the code can run under.
 
 ### 8.4 What the Project Explicitly Does Not Enable
 
@@ -967,8 +965,10 @@ These are not bugs. They are the contribution.
   marshaling) lands in v1.1.
 - **C2PA assertion emission.** Map our `SessionManifest` to a C2PA-compatible
   set of assertions and ship the integration as an opt-in target.
-- **LivePortrait integration** *if and only if* the upstream license clarifies
-  to be compatible with AGPL-3.0 + commercial dual-licensing.
+- **LivePortrait integration** as the primary `.consentedThirdParty` photoreal
+  backend, landed at v1.0.0 under ADR-0015's research-only posture. Inference
+  wiring (per-frame CoreML calls + replacing the camera passthrough with the
+  generator output) is v1.1.
 - **Federated user study (Section 7).** Run the pre-registered comprehension
   and cognitive-load study with deaf, HoH, and hearing participants in
   parallel-language contexts.
@@ -1004,9 +1004,10 @@ identity-transforming media should be consent, disclosure, and provenance,
 encoded so they cannot be flipped off**.
 
 The complete source, the benchmark suite, the consent CLI, and the verifier
-are released as `mirror-mesh` under AGPL-3.0 (with a separate commercial
-track) at the project's repository. We invite replication, extension, and —
-in particular — pull requests that strengthen the trust layer further.
+are released as `mirror-mesh` under AGPL-3.0-only — a research project, with
+no commercial license available from any party. We invite replication,
+extension, and — in particular — pull requests that strengthen the trust
+layer further.
 
 ---
 
@@ -1117,7 +1118,7 @@ public demonstration of a face/voice swap surfaced the motivating question.
     Journal*, 24(2), 162-166. (Cited for the Delaunay triangulation used in
     the face-mesh renderer's topology.)
 25. **MirrorMesh Project.** (2026). Reference implementation, source repository,
-    and benchmark suite. AGPL-3.0 + commercial dual license. (This work.)
+    and benchmark suite. AGPL-3.0-only research project. (This work.)
     [@mirrormesh2026]
 
 ---

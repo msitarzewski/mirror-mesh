@@ -4,18 +4,15 @@ Thanks for your interest. A few things to know before you open a PR.
 
 ## License
 
-MirrorMesh is **dual-licensed**:
+MirrorMesh is **[AGPL-3.0-only](./LICENSE)** — a research project. See [`NOTICE.md`](./NOTICE.md) for the plain-English statement of intent. The previous v0.4.0 "AGPL + Commercial" dual ([ADR-0014](./memory-bank/decisions.md)) is superseded by [ADR-0015](./memory-bank/decisions.md); the Commercial half is dropped because no commercial offering is intended.
 
-- **AGPL-3.0** for open-source use (see [`LICENSE`](./LICENSE))
-- **A separate commercial license** for closed-source / proprietary use (see [`COMMERCIAL.md`](./COMMERCIAL.md))
-
-When you contribute, your changes must be acceptable under **both** licenses — this is what lets the project continue to be available to commercial licensees.
+When you contribute, your changes are licensed under AGPL-3.0 alongside the rest of the project. You retain copyright in your work.
 
 ## Developer Certificate of Origin (DCO)
 
 We don't ask you to sign a Contributor License Agreement. We do ask you to sign every commit with the **Developer Certificate of Origin** (DCO) — the same lightweight mechanism the Linux kernel uses.
 
-What signing means: you're certifying the four points in the DCO 1.1 text below. You retain copyright in your contribution; you grant a license consistent with both AGPL-3.0 and the commercial license.
+What signing means: you're certifying the four points in the DCO 1.1 text below. You retain copyright in your contribution; you grant a license consistent with AGPL-3.0.
 
 ### How to sign
 

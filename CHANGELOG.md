@@ -1,9 +1,14 @@
 # Changelog
 
-## v0.4.0 — "Sustainable" — 2026-05-19 (in progress)
+## v1.0.0 — 2026-05-20
 
 ### Changed
-- **License pivot**: Apache-2.0 → AGPL-3.0 + Commercial dual-license (ADR-0014). Apache-2.0 commits remain Apache; new contributions land under AGPL + commercial. See [`COMMERCIAL.md`](./COMMERCIAL.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+- **License simplification**: AGPL-3.0 + Commercial dual → **AGPL-3.0-only** (ADR-0015 supersedes ADR-0014). `COMMERCIAL.md` deleted; `NOTICE.md` added stating the research-only posture in plain English. Research-only model dependencies (LivePortrait + InsightFace runtime weights) are now usable under this posture.
+
+## v0.4.0 — "Sustainable" — 2026-05-19
+
+### Changed
+- **License pivot**: Apache-2.0 → AGPL-3.0 + Commercial dual-license (ADR-0014). Apache-2.0 commits remain Apache; new contributions land under AGPL + commercial.
 - DCO sign-off required on every commit (Linux-kernel-style, no CLA).
 - README and ADR-0005 retained for history; ADR-0014 supersedes the license decision.
 

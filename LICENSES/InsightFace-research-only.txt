@@ -1,0 +1,53 @@
+InsightFace research-only restriction (as it applies to LivePortrait)
+=====================================================================
+
+The LivePortrait inference pipeline uses face-detection / face-landmark
+models from the InsightFace project as a preprocessing step (face crop +
+template extraction before the four LivePortrait submodels run). The
+InsightFace *code* is MIT-licensed; the InsightFace *runtime weights* are
+released for non-commercial research purposes only. LivePortrait's LICENSE
+file appends this restriction verbatim — it is reproduced below.
+
+In MirrorMesh, this restriction is satisfied by ADR-0015 (2026-05-20):
+MirrorMesh is licensed AGPL-3.0-only as an explicit research-only project.
+The maintainer's stated intent is to *prevent* anyone (including
+themselves) from monetising the code or its derivatives, and the AGPL
+surface enforces that for downstream redistribution. Under this posture,
+the InsightFace weights' "non-commercial research purposes only" clause is
+honoured because:
+
+  1. MirrorMesh itself is a non-commercial research project — see
+     `NOTICE.md` at the repo root and the README's license section.
+  2. AGPL-3.0 closes the SaaS loophole that would otherwise let a third
+     party host a hosted commercial service derived from MirrorMesh
+     without redistributing source. With that loophole closed, downstream
+     commercial use of MirrorMesh-derived InsightFace inference is
+     contractually impossible without violating AGPL — at which point the
+     downstream party is already in license breach and the InsightFace
+     restriction is the second wall, not the first.
+  3. The runtime weights are NOT redistributed by MirrorMesh. The user
+     downloads them from upstream LivePortrait / InsightFace themselves at
+     conversion time (see `models/training/README.md`). MirrorMesh's
+     redistribution footprint is the *architecture source* (MIT,
+     LICENSES/LivePortrait-MIT.txt) and the *conversion script* (AGPL-3.0,
+     repo root LICENSE), neither of which is research-restricted.
+
+If a downstream contributor wishes to use MirrorMesh in a commercial
+setting, they would need to:
+
+  (a) honour AGPL-3.0's source-disclosure requirements (the primary
+      blocker), AND
+  (b) replace the InsightFace face-detection models with a commercially
+      licensed alternative — as LivePortrait's own LICENSE instructs.
+
+The verbatim research-only clause from LivePortrait's LICENSE file
+(upstream commit 49784e879821538ecda5c8e4ca0472f4cb6236cf):
+
+================================================================================
+The code of InsightFace is released under the MIT License.
+The models of InsightFace are for non-commercial research purposes only.
+
+If you want to use the LivePortrait project for commercial purposes, you
+should remove and replace InsightFace’s detection models to fully comply with
+the MIT license.
+================================================================================

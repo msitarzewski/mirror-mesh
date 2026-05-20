@@ -12,7 +12,7 @@
 - **Consent-First Identity Protocol** — `.mmid` bundles bind a source image to a signed disclosure agreement, a runtime scope, and one of three explicit identity schemes; the reenactor refuses to initialize without verification.
 - **Layered transparency** — per-frame Ed25519 signatures, visible "MIRRORMESH • SYNTHETIC" badge, signed session manifest, and audible session-start chirp. All four locked-on in release builds.
 - **Measured E2E latency on a Mac17,6 (M5 Max)**: P50 1.4 ms (synthetic input) / P50 5.1 ms (real Apple Vision on the procedural fixture clip).
-- **AGPL-3.0 + separate commercial license**, DCO-signed contributions, source-shippable `.app`.
+- **AGPL-3.0-only research project**, DCO-signed contributions, source-shippable `.app`.
 
 ---
 
@@ -64,9 +64,9 @@ Distributable scaffolding:
 
 Sustainability — both architectural and commercial:
 
-- License pivot Apache-2.0 → **AGPL-3.0 + separate commercial** (ADR-0014). DCO sign-off on every commit.
+- License pivot Apache-2.0 → AGPL-3.0 + separate commercial (ADR-0014), then simplified to **AGPL-3.0-only research project** at v1.0.0 (ADR-0015). DCO sign-off on every commit.
 - Glass UI redesign — proper `.inspector(isPresented:)`, `Form { Section { } header: footer: }`, `.thinMaterial` backgrounds.
-- App menu commands: About, File menu (New Session, Reveal Sessions Folder), View menu (Show Landmarks, Show Avatar Mask), Pipeline menu (Watermark Visibility), Help menu (Documentation, AGPL, Commercial).
+- App menu commands: About, File menu (New Session, Reveal Sessions Folder), View menu (Show Landmarks, Show Avatar Mask), Pipeline menu (Watermark Visibility), Help menu (Documentation, AGPL).
 - Programmatic app icon (10 PNG variants via `bench/scripts/generate_app_icon.swift`).
 - Three critical bug fixes: upside-down watermark text, dead telemetry panel, camera preview pixel-copied into corner.
 - Live settings → renderer wiring (no more "checkboxes that don't toggle").
@@ -252,16 +252,13 @@ We are explicit about what we did not finish. Each item below is tracked.
 
 ## License
 
-MirrorMesh is **dual-licensed**.
+**[AGPL-3.0-only](./LICENSE).** Research project — see [`NOTICE.md`](./NOTICE.md) for the plain-English statement.
 
-- **[AGPL-3.0](./LICENSE)** for open-source use. Researchers, academics, hobbyists, and anyone happy to release derivatives under AGPL are covered for free. The "A" closes the SaaS loophole that plain GPL has.
-- **[Commercial license](./COMMERCIAL.md)** for closed-source / proprietary / non-AGPL-compatible use — separate paid agreement with the maintainer.
+The maintainer does not monetize this code and does not offer a commercial license. AGPL-3.0's strong copyleft + network-use clause prevents anyone else from monetizing derivatives. The previous v0.4.0 "AGPL + Commercial" dual ([ADR-0014](./memory-bank/decisions.md)) is superseded by [ADR-0015](./memory-bank/decisions.md) at v1.0.0; the Commercial half is dropped because no commercial offering was ever intended.
 
-The trust-layer invariants (watermarking on by default, no third-party impersonation without signed consent, no celebrity presets, no cloud fallback on the inference hot path) are architectural; they survive both license tracks. Every commercial license carries them as contractual obligations.
+The trust-layer invariants (watermarking on by default, no third-party impersonation without signed consent, no celebrity presets, no cloud fallback on the inference hot path) are architectural; they're enforced by the code itself, not by the legal text.
 
 Contributing: see [`CONTRIBUTING.md`](./CONTRIBUTING.md). DCO sign-off (`git commit -s`) required on every commit. No CLA. PRs welcome.
-
-Commercial inquiries: see [`COMMERCIAL.md`](./COMMERCIAL.md) for the contact path.
 
 ---
 

@@ -1,8 +1,8 @@
 # MirrorMesh
 
 ![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)
-[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](./LICENSE)
-[![Commercial license available](https://img.shields.io/badge/commercial-available-green.svg)](./COMMERCIAL.md)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](./LICENSE)
+[![Research only](https://img.shields.io/badge/use-research%20only-orange.svg)](./NOTICE.md)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-black.svg)](./memory-bank/decisions.md)
 [![DCO](https://img.shields.io/badge/DCO-required-orange.svg)](./CONTRIBUTING.md)
 
@@ -129,14 +129,13 @@ The project's load-bearing rules live in [`memory-bank/projectRules.md`](./memor
 
 ## License
 
-**Dual-licensed**:
+**[AGPL-3.0-only](./LICENSE).** Research project — see [NOTICE.md](./NOTICE.md) for the plain-English statement of intent.
 
-- **[AGPL-3.0](./LICENSE)** for open-source use. Researchers, academics, hobbyists, and anyone happy to release derivatives under AGPL are covered for free. AGPL §13 closes the SaaS loophole.
-- **[Commercial license](./COMMERCIAL.md)** for closed-source or proprietary use that can't satisfy AGPL terms — separate paid agreement with the maintainer.
+The maintainer does not monetize this code and does not offer a commercial license. AGPL-3.0's strong copyleft + network-use clause prevents anyone else from monetizing derivatives. If you fork it, your fork is AGPL too; if you host it as a service, you must publish your source.
 
-The trust-layer invariants are architectural and survive both license tracks. Every commercial license carries them as contractual obligations.
+The trust-layer invariants (R1 / R2 / R12) are architectural and survive licensing. They're enforced by the code, not by the legal text.
 
-History: Apache-2.0 in v0.1.0 through v0.3.0; relicensed AGPL-3.0 + commercial at v0.4.0 ([ADR-0014](./memory-bank/decisions.md)).
+History: Apache-2.0 in v0.1.0 through v0.3.0; AGPL-3.0 + Commercial dual at v0.4.0 ([ADR-0014](./memory-bank/decisions.md)); simplified to AGPL-3.0-only at v1.0.0 ([ADR-0015](./memory-bank/decisions.md)).
 
 ---
 

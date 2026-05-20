@@ -11,7 +11,7 @@
 **Tests**: 149 tests / 29 suites passing under Swift Testing
 **Closed in this session**: M43, M52, M53, M55, M56 (stylized + FOMM scaffold), M57, M58, M59 (v0.6.0); v0.7.0 Voice (Apple Speech on-device); v0.8.0 Translation+lip-sync; v0.9.0 paper draft + protocol spec
 **Open milestones**: M81/M82/M83 (notarization — blocked on Team ID); M75/M76 (paper bench measurements for camera-ready); v0.7→v0.8 pipeline stage integration (CLIs work standalone, pipeline integration is documented but not wired)
-**License**: **AGPL-3.0 + Commercial dual** (ADR-0014). Copyright "Michael Sitarzewski".
+**License**: **AGPL-3.0-only research project** (ADR-0015 supersedes ADR-0014). Copyright "Michael Sitarzewski".
 **Hardware**: User on M5 Max / 128 GB / 40 GPU cores — ML model selection unconstrained.
 **Open inputs from user**: `DEVELOPMENT_TEAM`, App Store Connect API key, GitHub `<user>/<repo>` URL.
 

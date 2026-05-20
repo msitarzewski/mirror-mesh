@@ -62,11 +62,13 @@ struct PhotorealBackendTests {
         }
     }
 
-    // MARK: - Models gate
+    // MARK: - Models gate (default kind = LivePortrait per ADR-0015)
 
-    @Test func missingModelsDirThrows() throws {
+    @Test func missingModelsDirThrowsForLivePortraitByDefault() throws {
         // Valid, signed, photoreal-eligible identity — but no .mlpackage files on disk.
-        // Backend must refuse: this is the load-time contract (R12).
+        // The default `kind:` is `.liveportrait` (ADR-0015), so the surfaced error must
+        // (a) carry the LivePortrait kind and (b) name LivePortrait's expected files in
+        // its description so the SwiftUI panel can render the right "download" CTA.
         let signed = try makeSignedBundle(scheme: .selfAsSource)
         let emptyDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("mm-photoreal-empty-\(UUID().uuidString)", isDirectory: true)
@@ -81,21 +83,81 @@ struct PhotorealBackendTests {
                 modelsDir: emptyDir
             )
             Issue.record("expected PhotorealBackend init to throw .modelsMissing, but it succeeded")
-        } catch let PhotorealBackend.LoadError.modelsMissing(reportedDir) {
-            // The error should point at the directory we asked about — that's what
-            // the SwiftUI panel needs in order to render a "download weights" CTA.
+        } catch let PhotorealBackend.LoadError.modelsMissing(reportedDir, reportedKind) {
             #expect(reportedDir.path == emptyDir.path)
+            #expect(reportedKind == .liveportrait)
+            // Description must name the LivePortrait files so the user-facing CTA is
+            // accurate. We assert the specific file names rather than the whole string
+            // to avoid coupling the test to wording.
+            let desc = PhotorealBackend.LoadError.modelsMissing(reportedDir, reportedKind).description
+            #expect(desc.contains("appearance_v1.mlpackage"))
+            #expect(desc.contains("warp_v1.mlpackage"))
+            #expect(desc.contains("liveportrait_to_coreml.py"))
         } catch {
             Issue.record("expected .modelsMissing, got \(type(of: error)): \(error)")
         }
     }
 
+    @Test func missingModelsDirThrowsForFOMM() throws {
+        // Explicit `kind: .fomm` — the FOMM fallback path. Same gate behavior, but the
+        // surfaced error names the FOMM file set + the FOMM conversion script.
+        let signed = try makeSignedBundle(scheme: .selfAsSource)
+        let emptyDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mm-photoreal-empty-fomm-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: emptyDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: emptyDir) }
+
+        do {
+            _ = try PhotorealBackend(
+                kind: .fomm,
+                identity: signed.identity,
+                pngBytes: signed.png,
+                runtimeVersion: "0.6.0",
+                modelsDir: emptyDir
+            )
+            Issue.record("expected PhotorealBackend init to throw .modelsMissing, but it succeeded")
+        } catch let PhotorealBackend.LoadError.modelsMissing(reportedDir, reportedKind) {
+            #expect(reportedDir.path == emptyDir.path)
+            #expect(reportedKind == .fomm)
+            let desc = PhotorealBackend.LoadError.modelsMissing(reportedDir, reportedKind).description
+            #expect(desc.contains("keypoint_v1.mlpackage"))
+            #expect(desc.contains("generator_v1.mlpackage"))
+            #expect(desc.contains("fomm_to_coreml.py"))
+            #expect(!desc.contains("appearance_v1.mlpackage"))
+        } catch {
+            Issue.record("expected .modelsMissing, got \(type(of: error)): \(error)")
+        }
+    }
+
+    // MARK: - Kind-selection — the file lists differ
+
+    @Test func modelFileNamesAreKindSpecific() throws {
+        // The contract between this backend and the two conversion scripts.
+        // LivePortrait splits the forward pass four ways (appearance cached + motion +
+        // warp + generator); FOMM splits three ways (keypoint + motion + generator).
+        let lp = PhotorealBackend.modelFileNames(for: .liveportrait)
+        let fomm = PhotorealBackend.modelFileNames(for: .fomm)
+
+        #expect(lp.count == 4)
+        #expect(lp.contains("appearance_v1.mlpackage"))
+        #expect(lp.contains("motion_v1.mlpackage"))
+        #expect(lp.contains("warp_v1.mlpackage"))
+        #expect(lp.contains("generator_v1.mlpackage"))
+
+        #expect(fomm.count == 3)
+        #expect(fomm.contains("keypoint_v1.mlpackage"))
+        #expect(fomm.contains("motion_v1.mlpackage"))
+        #expect(fomm.contains("generator_v1.mlpackage"))
+        #expect(!fomm.contains("appearance_v1.mlpackage"))
+        #expect(!fomm.contains("warp_v1.mlpackage"))
+    }
+
     // MARK: - Stub behavior (will change when real conversion lands)
 
-    // NOTE: this test documents the *current stub*. When the follow-up commit wires
-    // the real CoreML inference graph in, this test changes — the output buffer should
-    // then differ from the input. Until then, the stub is a deterministic pass-through
-    // so the surrounding pipeline integration can be tested independently of the model.
+    // NOTE: this test documents the *current stub*. When M56-photoreal-inference lands,
+    // the output buffer should then differ from the input. Until then, the stub is a
+    // deterministic pass-through so the surrounding pipeline integration can be tested
+    // independently of the model.
     //
     // We can't exercise reenact() without a constructed backend, and we can't construct
     // one without the .mlpackage files. So this test is *currently disabled* via the
@@ -105,15 +167,23 @@ struct PhotorealBackendTests {
     // skipped, the runner prints a clear reminder.
     @Test(
         "stub reenact passes driver image through unchanged (enabled once models are converted)",
-        .disabled("Requires keypoint_v1/motion_v1/generator_v1 .mlpackage under MIRRORMESH_FOMM_MODELS_DIR")
+        .disabled("Requires LivePortrait .mlpackage set under MIRRORMESH_LIVEPORTRAIT_MODELS_DIR (or FOMM via MIRRORMESH_FOMM_MODELS_DIR)")
     )
     func stubPassesThroughDriverImage() async throws {
-        guard let dirPath = ProcessInfo.processInfo.environment["MIRRORMESH_FOMM_MODELS_DIR"] else {
+        let env = ProcessInfo.processInfo.environment
+        let (modelsDir, kind): (URL, PhotorealBackendKind)
+        if let lpPath = env["MIRRORMESH_LIVEPORTRAIT_MODELS_DIR"] {
+            modelsDir = URL(fileURLWithPath: lpPath)
+            kind = .liveportrait
+        } else if let fommPath = env["MIRRORMESH_FOMM_MODELS_DIR"] {
+            modelsDir = URL(fileURLWithPath: fommPath)
+            kind = .fomm
+        } else {
             return
         }
-        let modelsDir = URL(fileURLWithPath: dirPath)
         let signed = try makeSignedBundle(scheme: .selfAsSource)
         let backend = try PhotorealBackend(
+            kind: kind,
             identity: signed.identity,
             pngBytes: signed.png,
             runtimeVersion: "0.6.0",

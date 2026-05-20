@@ -1,0 +1,46 @@
+# Conversion-time dependencies for models/training/liveportrait_to_coreml.py.
+#
+# Kept separate from models/training/requirements.txt (which pins the
+# blendshape-solver script's exact stack at torch 2.7.1 / coremltools 8.3.0)
+# and from models/training/requirements-fomm.txt (separate slab for FOMM)
+# because each conversion path exercises a different surface of coremltools'
+# torch frontend, and pinning them independently keeps drift in one path
+# from breaking the others.
+#
+# Pinned reasons:
+#   - torch >= 2.4 — LivePortrait checkpoints contain pickled subclasses
+#     that `torch.load(..., weights_only=False)` handles correctly from
+#     torch 2.4+.
+#   - coremltools >= 9.0 — needed for the FLOAT16 compute_precision knob
+#     used in the conversion call, and for stable mlprogram tracing of the
+#     ConvNeXtV2 backbone's LayerNorm / GELU / GRN sequence as well as the
+#     SPADE decoder's spectral_norm-wrapped convs.
+#   - numpy < 2 — coremltools 9.0 still ships C extensions linked against
+#     numpy 1.x's ABI; numpy 2.0 changes trigger ImportError at import.
+#   - scikit-image — LivePortrait's upstream inference pipeline pulls
+#     skimage for image preprocessing. We do not vendor that pipeline (the
+#     Swift runtime handles preprocessing), but the vendored modules
+#     transitively pull skimage through some torch-side utilities on
+#     certain coremltools paths. Cheap to install.
+#   - pyyaml — config loading if a future revision teaches the script to
+#     consume upstream LivePortrait config/*.yaml directly instead of the
+#     hard-coded HUMAN_256 dict.
+#   - onnx — LivePortrait's upstream runtime uses ONNX as an intermediate
+#     representation in some inference paths (especially for the
+#     stitching/retargeting MLPs). We don't currently route through ONNX
+#     in this script — torch.jit.trace -> coremltools handles all four
+#     submodels directly — but onnx is installed so future revisions
+#     can opportunistically switch a single submodel to the ONNX path if
+#     coremltools regresses on a layer.
+#
+# Install once with:
+#   /opt/homebrew/bin/python3.11 -m pip install -r models/training/requirements-liveportrait.txt
+#
+# python3.11 — NOT python3.14. See script docstring for rationale.
+
+torch>=2.4
+coremltools>=9.0
+numpy<2
+scikit-image>=0.22
+pyyaml>=6.0
+onnx>=1.16

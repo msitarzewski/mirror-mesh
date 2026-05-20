@@ -56,6 +56,6 @@ Same impressive demo to an outsider. Architecturally distinct.
 ## Notes
 
 - **FOMM license**: Apache-2.0 (we're clear)
-- **LivePortrait**: research-only, currently incompatible with AGPL+Commercial dual. Stay with FOMM unless license clarifies.
+- **LivePortrait**: was research-only and incompatible with the v0.4.0 AGPL+Commercial dual. After ADR-0015 (AGPL-3.0-only research-project posture) it became the recommended photoreal backend; FOMM remains as a license-clean fallback.
 - **Source frame quality**: FOMM's quality scales with source-frame resolution and lighting. Bundles produced by `mirrormesh-consent` should include a quality-check pass.
 - **Latency budget**: FOMM published numbers ~25 ms on M-series. Our full pipeline must stay < 100 ms including capture, vision, FOMM, render, watermark.
