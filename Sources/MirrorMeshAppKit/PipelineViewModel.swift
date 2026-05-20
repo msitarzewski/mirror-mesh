@@ -75,6 +75,22 @@ public final class PipelineViewModel: ObservableObject {
     /// User-facing error from the most recent translation-stage attempt. Nil when healthy.
     @Published public var translationError: String? = nil
 
+    // MARK: - Photoreal (M88/M89, LivePortrait CoreML graph)
+
+    /// True when all four LivePortrait `.mlpackage` files were discovered on disk at one of the
+    /// candidate locations checked by `detectPhotorealModelsDir()`. False when any are missing.
+    /// Drives the "available" vs "not available" branches in `IdentityInspector`.
+    @Published public var photorealAvailable: Bool = false
+    /// True when the pipeline's `PhotorealStage` is actively substituting frames. Set by
+    /// `setPhotorealEnabled(_:)` after the pipeline confirms the stage loaded and is in the
+    /// frame path; toggled off on stage error or explicit disable.
+    @Published public var photorealActive: Bool = false
+    /// Filesystem path where the four mlpackages were discovered. Nil when models are not
+    /// available. Surfaced in the inspector for transparency.
+    @Published public var photorealModelsDir: URL? = nil
+    /// User-facing error from the most recent photoreal-stage attempt. Nil when healthy.
+    @Published public var photorealError: String? = nil
+
     public let ringBuffer: RingBufferSink
     public let settings: AppSettings
 
@@ -109,6 +125,17 @@ public final class PipelineViewModel: ObservableObject {
         if let (identity, png) = try? DefaultIdentityProvider.loadOrCreate() {
             self.consentedIdentity = identity
             self.identityPngData = png
+        }
+
+        // M88/M89 — sync filesystem probe (< 1 ms; safe to run on @MainActor init). Sets
+        // `photorealAvailable` so the inspector renders the right branch on first paint and
+        // the post-start hop in `start()` knows whether to auto-enable photoreal.
+        if let dir = Self.detectPhotorealModelsDir() {
+            self.photorealAvailable = true
+            self.photorealModelsDir = dir
+        } else {
+            self.photorealAvailable = false
+            self.photorealModelsDir = nil
         }
     }
 
@@ -238,6 +265,16 @@ public final class PipelineViewModel: ObservableObject {
                 guard let self else { return }
                 let opts = self.translationOptionsFromSettings()
                 await self.setTranslationEnabled(true, options: opts)
+            }
+        }
+
+        // M88/M89 "no gating": auto-enable the photoreal substitution stage if all four
+        // LivePortrait mlpackages are present on disk. Models missing → silently stays off
+        // and the inspector shows the user the install hint. Fails soft via `photorealError`.
+        if photorealAvailable {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.setPhotorealEnabled(true)
             }
         }
     }
@@ -371,6 +408,113 @@ public final class PipelineViewModel: ObservableObject {
             settings.setTranslationActive(false)
             translationError = "\(error)"
         }
+    }
+
+    /// Enable / disable the photoreal substitution stage on the live pipeline (M88/M89).
+    /// When enabled, the pipeline's `PhotorealStage` runs the four-`.mlpackage` LivePortrait
+    /// graph (appearance cached → motion + warp + generator per driving frame) and substitutes
+    /// the captured frame in Mirror/Mask styles. Wireframe stays untouched as the debug view.
+    ///
+    /// Models are auto-discovered via `detectPhotorealModelsDir()`; the resolved URL is passed
+    /// through to the pipeline. If discovery returned nil and the caller passes `on=true`, we
+    /// surface a user-readable error instead of starting the stage.
+    public func setPhotorealEnabled(_ on: Bool) async {
+        guard let p = pipeline else {
+            photorealActive = on
+            photorealError = on ? "Pipeline not running. Start a session first." : nil
+            return
+        }
+        if on && photorealModelsDir == nil {
+            photorealActive = false
+            photorealError = "LivePortrait models not found. See models/training/README.md."
+            return
+        }
+        do {
+            try await p.setPhotorealEnabled(on, modelsDir: photorealModelsDir)
+            photorealActive = on
+            photorealError = nil
+        } catch {
+            photorealActive = false
+            photorealError = "\(error)"
+        }
+    }
+
+    /// Required mlpackages for the LivePortrait CoreML graph (agent A's `PhotorealBackend`).
+    /// All four must be present at the same candidate location; a partial set returns nil.
+    private static let photorealRequiredFiles: [String] = [
+        "appearance_v1.mlpackage",
+        "motion_v1.mlpackage",
+        "warp_v1.mlpackage",
+        "generator_v1.mlpackage",
+    ]
+
+    /// Look for the four LivePortrait mlpackages in the standard candidate locations and
+    /// return the URL of the first directory that contains all of them. Returns nil when
+    /// no candidate is complete (the inspector then renders the install-hint branch).
+    ///
+    /// Order:
+    /// 1. `<repo-root>/models/` — dev / `swift run` invocations from the workspace
+    /// 2. `~/Library/Application Support/MirrorMesh/models/` — user-installed weights
+    /// 3. `<app bundle>/Contents/Resources/models/` — shipped weights (unlikely for v1.0)
+    ///
+    /// Why @MainActor-safe: pure `FileManager.fileExists` stats; no I/O blocking beyond a
+    /// handful of inode lookups. Measured << 1 ms on M5 Max.
+    private static func detectPhotorealModelsDir() -> URL? {
+        let fm = FileManager.default
+        var candidates: [URL] = []
+
+        // 1) Dev / repo-root probe. `CommandLine.arguments[0]` is the executable; walk up
+        //    until we find a sibling `Package.swift` and then look at `models/`. This catches
+        //    `swift run mirrormesh-app` from `/Users/<u>/.../mirror-mesh/`.
+        if let exe = URL(string: CommandLine.arguments.first ?? "") {
+            var dir = exe.deletingLastPathComponent()
+            for _ in 0..<8 {
+                let pkg = dir.appendingPathComponent("Package.swift")
+                if fm.fileExists(atPath: pkg.path) {
+                    candidates.append(dir.appendingPathComponent("models", isDirectory: true))
+                    break
+                }
+                let parent = dir.deletingLastPathComponent()
+                if parent.path == dir.path { break }
+                dir = parent
+            }
+        }
+        // Also try the actual cwd, since `swift run` resolves arguments[0] to .build/... but the
+        // working directory is the repo root.
+        candidates.append(URL(fileURLWithPath: fm.currentDirectoryPath, isDirectory: true)
+            .appendingPathComponent("models", isDirectory: true))
+
+        // 2) User-installed.
+        if let appSupport = try? fm.url(for: .applicationSupportDirectory,
+                                         in: .userDomainMask,
+                                         appropriateFor: nil,
+                                         create: false) {
+            candidates.append(appSupport
+                .appendingPathComponent("MirrorMesh", isDirectory: true)
+                .appendingPathComponent("models", isDirectory: true))
+        }
+
+        // 3) Shipped in the app bundle.
+        if let res = Bundle.main.resourceURL {
+            candidates.append(res.appendingPathComponent("models", isDirectory: true))
+        }
+
+        for dir in candidates {
+            if hasAllPhotorealFiles(at: dir, fm: fm) {
+                return dir
+            }
+        }
+        return nil
+    }
+
+    /// True when every required mlpackage is present at `dir`. Used by `detectPhotorealModelsDir`
+    /// to filter partial installs (e.g. a user who downloaded one but not all four weights).
+    private static func hasAllPhotorealFiles(at dir: URL, fm: FileManager) -> Bool {
+        for name in photorealRequiredFiles {
+            let url = dir.appendingPathComponent(name)
+            if !fm.fileExists(atPath: url.path) { return false }
+        }
+        return true
     }
 
     /// Build a `TranslationStageOptions` from the current `AppSettings`. Used by

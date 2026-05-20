@@ -17,6 +17,8 @@
 | **M85** | DCO + CONTRIBUTING.md final | ⚪ |
 | **M86** | License files final (AGPL-3.0-only + DCO + NOTICE.md per ADR-0015) | ✅ |
 | **M87** | Demo video for README header | ⚪ post-1.0 |
+| **M88** | Photoreal inference wiring (LivePortrait CoreML graph) | ✅ |
+| **M89** | Photoreal UX feedback (inspector + toolbar pill + subtitles) | ✅ |
 
 ## Exit criteria
 

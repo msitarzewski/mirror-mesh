@@ -37,6 +37,7 @@ public struct IdentityInspector: View {
     public var body: some View {
         Section {
             statusBlock
+            photorealStatusBlock
             Button {
                 presentOpenPanel()
             } label: {
@@ -104,6 +105,130 @@ public struct IdentityInspector: View {
         case .selfAsSource:       return "self-as-source"
         case .stylizedNonHuman:   return "stylized non-human"
         case .consentedThirdParty: return "consented third-party"
+        }
+    }
+
+    // MARK: - Photoreal status (M88/M89)
+
+    /// Three-state row that mirrors `PipelineViewModel.photoreal*`:
+    /// - `photorealError` set  → red triangle + error string
+    /// - `photorealActive`     → green sparkles + "ON" + models-dir path
+    /// - `photorealAvailable`  → secondary sparkles + "available (off)" + "Tap to enable"
+    /// - otherwise             → secondary tray + "not available" + install hint (clickable)
+    ///
+    /// Matches the layout pattern in `statusBlock` above — leading SF Symbol + 4 pt VStack.
+    @ViewBuilder
+    private var photorealStatusBlock: some View {
+        if let err = viewModel.photorealError {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Photoreal: error")
+                        .font(.caption.weight(.semibold))
+                    Text(err)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        } else if viewModel.photorealActive {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Photoreal: ON")
+                        .font(.callout.weight(.medium))
+                    Text("LivePortrait models loaded at \(viewModel.photorealModelsDir?.path ?? "—")")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                }
+            }
+        } else if viewModel.photorealAvailable {
+            Button {
+                Task { await viewModel.setPhotorealEnabled(true) }
+            } label: {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Photoreal: available (off)")
+                            .font(.callout)
+                            .foregroundStyle(.primary)
+                        Text("Tap to enable")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+        } else {
+            Button {
+                openPhotorealInstallReadme()
+            } label: {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "tray")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Photoreal: not available")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Text("Run models/training/liveportrait_to_coreml.py to install")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 3) {
+                            Image(systemName: "info.circle")
+                                .font(.caption2)
+                            Text("models/training/README.md")
+                                .font(.caption2.monospaced())
+                        }
+                        .foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .help("Click to open the install guide in your default viewer.")
+        }
+    }
+
+    /// Open the models/training/README.md in the system viewer. Walks up from CWD looking
+    /// for the repo root (the file sibling to `Package.swift`) so it works regardless of
+    /// whether the app was launched from `swift run` or a `.app` bundle. Best-effort: if the
+    /// file isn't found we open the `models/training/` directory if it exists, otherwise no-op.
+    private func openPhotorealInstallReadme() {
+        let fm = FileManager.default
+        var roots: [URL] = []
+        // 1) Anchored to the running executable.
+        if let exe = URL(string: CommandLine.arguments.first ?? "") {
+            var dir = exe.deletingLastPathComponent()
+            for _ in 0..<8 {
+                if fm.fileExists(atPath: dir.appendingPathComponent("Package.swift").path) {
+                    roots.append(dir); break
+                }
+                let parent = dir.deletingLastPathComponent()
+                if parent.path == dir.path { break }
+                dir = parent
+            }
+        }
+        // 2) The current working directory (covers `swift run` from repo root).
+        roots.append(URL(fileURLWithPath: fm.currentDirectoryPath, isDirectory: true))
+
+        for root in roots {
+            let readme = root.appendingPathComponent("models/training/README.md")
+            if fm.fileExists(atPath: readme.path) {
+                NSWorkspace.shared.open(readme)
+                return
+            }
+            let dir = root.appendingPathComponent("models/training", isDirectory: true)
+            if fm.fileExists(atPath: dir.path) {
+                NSWorkspace.shared.open(dir)
+                return
+            }
         }
     }
 

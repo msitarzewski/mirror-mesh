@@ -32,6 +32,12 @@
     - Final polish: added `SessionManifest.identity_sha256` (paper-flagged gap) + helper `ConsentedIdentityVerifier.canonicalSHA256(...)`. Clarified R3 wording from "no network call" → "no off-device network call" to legitimize localhost Ollama.
     - Test count: 66/17 → 110/23 (after wave 1) → 149/29 (after wave 2). All green.
     - Total: 15 library modules, 9 CLI executables, 1 .app target.
+- 2026-05-20 — **Photoreal landed**: LivePortrait inference wired end-to-end.
+  PhotorealBackend.reenact runs the full 4-mlpackage graph (appearance cached,
+  motion + warp + generator per driving frame). PhotorealStage substitutes the
+  captured frame in Mirror/Mask styles; Wireframe stays as debug. UX surfaces
+  in IdentityInspector + toolbar pill. Auto-enabled on session start when
+  models are present (per "no gating" policy from 2026-05-20).
 
 ## In Progress
 

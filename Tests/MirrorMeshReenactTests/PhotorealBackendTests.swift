@@ -10,7 +10,7 @@ struct PhotorealBackendTests {
 
     // MARK: - Identity gate
 
-    @Test func unverifiedIdentityIsRejected() throws {
+    @Test func unverifiedIdentityIsRejected() async throws {
         // Build a header with a *bad* signature: same shape as a real bundle but the
         // PNG bytes don't match the recorded source_png_sha256, so verify() fails
         // with payloadHashMismatch — which the backend remaps to .identityNotVerified.
@@ -32,8 +32,8 @@ struct PhotorealBackendTests {
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        #expect(throws: PhotorealBackend.LoadError.self) {
-            _ = try PhotorealBackend(
+        await #expect(throws: PhotorealBackend.LoadError.self) {
+            _ = try await PhotorealBackend(
                 identity: identity,
                 pngBytes: png,
                 runtimeVersion: "0.6.0",
@@ -42,7 +42,7 @@ struct PhotorealBackendTests {
         }
     }
 
-    @Test func stylizedNonHumanSchemeIsRejected() throws {
+    @Test func stylizedNonHumanSchemeIsRejected() async throws {
         // A *valid* signed bundle whose scheme is .stylizedNonHuman — the photoreal
         // backend explicitly refuses these (they go through FaceReenactor's procedural
         // path). The error type is .identityNotVerified.
@@ -52,8 +52,8 @@ struct PhotorealBackendTests {
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        #expect(throws: PhotorealBackend.LoadError.self) {
-            _ = try PhotorealBackend(
+        await #expect(throws: PhotorealBackend.LoadError.self) {
+            _ = try await PhotorealBackend(
                 identity: signed.identity,
                 pngBytes: signed.png,
                 runtimeVersion: "0.6.0",
@@ -64,7 +64,7 @@ struct PhotorealBackendTests {
 
     // MARK: - Models gate (default kind = LivePortrait per ADR-0015)
 
-    @Test func missingModelsDirThrowsForLivePortraitByDefault() throws {
+    @Test func missingModelsDirThrowsForLivePortraitByDefault() async throws {
         // Valid, signed, photoreal-eligible identity — but no .mlpackage files on disk.
         // The default `kind:` is `.liveportrait` (ADR-0015), so the surfaced error must
         // (a) carry the LivePortrait kind and (b) name LivePortrait's expected files in
@@ -76,7 +76,7 @@ struct PhotorealBackendTests {
         defer { try? FileManager.default.removeItem(at: emptyDir) }
 
         do {
-            _ = try PhotorealBackend(
+            _ = try await PhotorealBackend(
                 identity: signed.identity,
                 pngBytes: signed.png,
                 runtimeVersion: "0.6.0",
@@ -98,7 +98,7 @@ struct PhotorealBackendTests {
         }
     }
 
-    @Test func missingModelsDirThrowsForFOMM() throws {
+    @Test func missingModelsDirThrowsForFOMM() async throws {
         // Explicit `kind: .fomm` — the FOMM fallback path. Same gate behavior, but the
         // surfaced error names the FOMM file set + the FOMM conversion script.
         let signed = try makeSignedBundle(scheme: .selfAsSource)
@@ -108,12 +108,12 @@ struct PhotorealBackendTests {
         defer { try? FileManager.default.removeItem(at: emptyDir) }
 
         do {
-            _ = try PhotorealBackend(
-                kind: .fomm,
+            _ = try await PhotorealBackend(
                 identity: signed.identity,
                 pngBytes: signed.png,
                 runtimeVersion: "0.6.0",
-                modelsDir: emptyDir
+                modelsDir: emptyDir,
+                kind: .fomm
             )
             Issue.record("expected PhotorealBackend init to throw .modelsMissing, but it succeeded")
         } catch let PhotorealBackend.LoadError.modelsMissing(reportedDir, reportedKind) {
@@ -182,12 +182,12 @@ struct PhotorealBackendTests {
             return
         }
         let signed = try makeSignedBundle(scheme: .selfAsSource)
-        let backend = try PhotorealBackend(
-            kind: kind,
+        let backend = try await PhotorealBackend(
             identity: signed.identity,
             pngBytes: signed.png,
             runtimeVersion: "0.6.0",
-            modelsDir: modelsDir
+            modelsDir: modelsDir,
+            kind: kind
         )
 
         let input = try makeDummyPixelBuffer(width: 64, height: 64)

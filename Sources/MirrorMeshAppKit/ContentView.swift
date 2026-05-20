@@ -161,9 +161,9 @@ public struct ContentView: View {
             }
         }
         ToolbarItem(placement: .navigation) {
-            // v0.7.0 / v0.8.0 — voice + translation activity chips. Only render when active so
-            // the toolbar stays uncluttered during the common case.
-            if viewModel.voiceActive || viewModel.translationActive {
+            // v0.7.0 / v0.8.0 / M89 — voice + translation + photoreal activity chips. Only
+            // render when at least one is active so the toolbar stays uncluttered.
+            if viewModel.voiceActive || viewModel.translationActive || viewModel.photorealActive {
                 voiceTranslationPills
             }
         }
@@ -201,6 +201,18 @@ public struct ContentView: View {
                     .padding(.vertical, 4)
                     .background(.regularMaterial, in: Capsule())
                     .help("Translating to \(viewModel.settings.translationTargetLocale) via local Ollama. Disclosure chirp is locked on.")
+            }
+            if viewModel.photorealActive {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                    Text("Photoreal")
+                        .font(.callout.weight(.medium))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.regularMaterial, in: Capsule())
+                .foregroundStyle(.primary)
+                .help("LivePortrait CoreML graph is substituting the captured frame in Mirror/Mask styles. Wireframe stays as the debug view.")
             }
         }
     }
@@ -290,7 +302,9 @@ private struct SettingsInspector: View {
                 }
                 .pickerStyle(.inline)
                 .labelsHidden()
-                Text(settings.renderStyle.subtitle)
+                Text(styleSubtitle(for: settings.renderStyle,
+                                   photorealActive: viewModel.photorealActive,
+                                   photorealAvailable: viewModel.photorealAvailable))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -353,6 +367,36 @@ private struct SettingsInspector: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// M89 — render-style subtitle that reacts to photoreal state. Wireframe is unaffected
+    /// (it's the debug view; photoreal doesn't apply per spec). Mirror/Mask copy flips to
+    /// "Photoreal face …" when active; appends a "stylized — install LivePortrait weights for
+    /// photoreal" hint when weights are missing but the user might want them.
+    private func styleSubtitle(for style: RenderStyle,
+                               photorealActive: Bool,
+                               photorealAvailable: Bool) -> String {
+        switch style {
+        case .wireframe:
+            // Photoreal doesn't change the debug view's meaning.
+            return style.subtitle
+        case .mirror:
+            if photorealActive {
+                return "Photoreal face from your .mmid identity, watermarked"
+            }
+            if !photorealAvailable {
+                return style.subtitle + " (stylized — install LivePortrait weights for photoreal)"
+            }
+            return style.subtitle
+        case .mask:
+            if photorealActive {
+                return "Photoreal hero + operator PIP, watermarked"
+            }
+            if !photorealAvailable {
+                return style.subtitle + " (stylized — install LivePortrait weights for photoreal)"
+            }
+            return style.subtitle
+        }
     }
 
     private var watermarkBinding: Binding<Bool> {

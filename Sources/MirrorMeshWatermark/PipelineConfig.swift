@@ -42,15 +42,25 @@ public struct WatermarkConfig: Codable, Sendable, Equatable {
     /// is mandatory (R2). Optional in Codable: pre-v0.7 manifests decode cleanly
     /// because `init(from:)` supplies `false` when the key is missing.
     public var voice_transformed: Bool
+    /// v1.1.0: true when the session ran with the photoreal reenactment path
+    /// active — i.e. a `PhotorealBackend` was loaded at start (or hot-swapped
+    /// in mid-session) and produced substituted frames for Mirror / Mask
+    /// styles. Disclosure-class metadata: the rendered face is a learned
+    /// reenactment of a consented identity, not the operator's raw camera
+    /// pixels. Optional + defaulted in Codable so pre-v1.1 manifests
+    /// round-trip cleanly (same shape as `voice_transformed`).
+    public var photoreal_active: Bool
 
     public init(visible: Bool,
                 signed: Bool,
                 audible_chirp: Bool,
-                voice_transformed: Bool = false) {
+                voice_transformed: Bool = false,
+                photoreal_active: Bool = false) {
         self.visible = visible
         self.signed = signed
         self.audible_chirp = audible_chirp
         self.voice_transformed = voice_transformed
+        self.photoreal_active = photoreal_active
     }
 
     // Custom decode so pre-v0.7 manifests (no voice_transformed key) round-trip
@@ -63,6 +73,7 @@ public struct WatermarkConfig: Codable, Sendable, Equatable {
         self.signed = try container.decode(Bool.self, forKey: .signed)
         self.audible_chirp = try container.decode(Bool.self, forKey: .audible_chirp)
         self.voice_transformed = try container.decodeIfPresent(Bool.self, forKey: .voice_transformed) ?? false
+        self.photoreal_active = try container.decodeIfPresent(Bool.self, forKey: .photoreal_active) ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -70,6 +81,7 @@ public struct WatermarkConfig: Codable, Sendable, Equatable {
         case signed
         case audible_chirp
         case voice_transformed
+        case photoreal_active
     }
 }
 

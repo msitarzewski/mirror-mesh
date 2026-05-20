@@ -4,7 +4,7 @@
 
 ## Status as of 2026-05-20
 
-**Working app**: live camera → real Vision landmarks → geometric or CoreML solver → **stylized 3D head reenactment gated on `ConsentedIdentity`** → optional **voice (Apple on-device Speech)** + **translation (Ollama) + TTS (AVSpeechSynthesizer) + audio-driven lip-sync overlay** on mouth region → Metal rendering (Wireframe / Mirror / Mask styles + stylized head composite) → Ed25519 watermark + visible badge + audible disclosure chirp + signed manifest carrying `identity_sha256` + `voice_transformed` + `audible_chirp` flags → SwiftUI window with operator PIP, Identity Inspector, Voice Inspector, Translation Inspector, toolbar activity pills.
+**Working app**: live camera → real Vision landmarks → geometric or CoreML solver → **stylized 3D head reenactment gated on `ConsentedIdentity`** → **optional photoreal substitution via LivePortrait CoreML graph (M88/M89)** when the four mlpackages are present → optional **voice (Apple on-device Speech)** + **translation (Ollama) + TTS (AVSpeechSynthesizer) + audio-driven lip-sync overlay** on mouth region → Metal rendering (Wireframe / Mirror / Mask styles + stylized head composite, photoreal frame substitution active in Mirror/Mask) → Ed25519 watermark + visible badge + audible disclosure chirp + signed manifest carrying `identity_sha256` + `voice_transformed` + `audible_chirp` flags → SwiftUI window with operator PIP, Identity Inspector (photoreal status row), Voice Inspector, Translation Inspector, toolbar activity pills (Listening / translation / **Photoreal**).
 
 Measured P50 latency on M5 Max:
 - Demo / synthetic / 640×360 / geometric solver: e2e 1.46 ms (vision 0.02, solver 0.06, render 0.69, watermark 0.58)
@@ -35,6 +35,8 @@ v0.9.0  ✅  Paper              — ASSETS-targeted draft v1 (7.5k words) + CONS
                                  Tables 1–4 filled with real measured benches
 v1.0.0  ✅  Ship-ready         — RELEASE_NOTES + README; notarization scripts work end-to-end;
                                  blocked only on user-paste Team ID + App Store Connect API key
+                                 M88 photoreal inference + M89 photoreal UX landed 2026-05-20
+                                 (LivePortrait CoreML graph; see docs/PHOTOREAL_QUICKSTART.md)
 ```
 
 ## How to feel the WOW
@@ -67,7 +69,7 @@ swift run mirrormesh-bench bench/scenarios/fixture.json
 - **Notarization** — blocked on user-paste of `DEVELOPMENT_TEAM` Team ID. Scripts are at `scripts/release/{archive,notarize}.sh`; template at `Local.xcconfig.template`; recipe at `scripts/release/README.md`.
 - **App Store Connect API key** — needed by `xcrun notarytool store-credentials mirrormesh-notary` once Team ID lands
 - **GitHub remote** — no remote configured; `gh release create v1.0.0` is a one-liner once the remote URL exists
-- **FOMM photoreal weights** — optional path; user runs `python3.11 models/training/fomm_to_coreml.py --weights ~/Downloads/vox-cpk.pth.tar --out models/` to convert weights for the photoreal alternative to the stylized head
+- **LivePortrait photoreal weights** — optional, the photoreal substitution path. If `<repo>/models/{appearance,motion,warp,generator}_v1.mlpackage` are present the app auto-detects them and the Identity inspector flips to "Photoreal: ON" with a toolbar pill; otherwise the stylized head from v0.6.0 keeps rendering. Conversion: `python3.11 models/training/liveportrait_to_coreml.py --weights <hf-download-dir> --out models/`. Full recipe: `docs/PHOTOREAL_QUICKSTART.md`.
 - **Reenact-active bench number** — paper Table 4 has the pass-through baseline (3.07 ms); the reenact-active cell awaits a `mirrormesh-bench --identity <.mmid>` flag (v1.1 follow-up)
 - **Power benches** — `bench/scripts/power.sh` requires sudo, headless run is pending
 

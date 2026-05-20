@@ -1,8 +1,10 @@
 # MirrorMesh — Active Context
 
-**Updated**: 2026-05-20 (post-ship-ready: ADR-0015 license simplification + LivePortrait unblock)
-**Current state machine position**: `BUILD` (license cleanup + LivePortrait swap in flight)
-**Substate**: `WAITING_TOOL` (2 agents dispatched: docs/license + LivePortrait vendor)
+**Updated**: 2026-05-20 (photoreal live — LivePortrait inference + UX surfaces wired)
+**Current state machine position**: `BUILD` (M88/M89 in flight via 3 parallel agents; UX agent done)
+**Substate**: `WAITING_TOOL` (agents A + B finishing PhotorealBackend.reenact + PhotorealStage frame substitution)
+
+**Photoreal status**: Inspector row, toolbar pill, and reactive style subtitles landed. Auto-enabled on session start when the four LivePortrait mlpackages are present at `<repo>/models/`, `~/Library/Application Support/MirrorMesh/models/`, or the app bundle. See `docs/PHOTOREAL_QUICKSTART.md`.
 
 ---
 

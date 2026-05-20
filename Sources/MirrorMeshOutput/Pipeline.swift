@@ -72,6 +72,21 @@ public struct PipelineOptions: Sendable {
     /// Carries source/target locale, Ollama config, TTS config, and lip-sync smoothing options.
     public var translationOptions: TranslationStageOptions?
 
+    /// v1.1.0 photoreal integration. When set, the pipeline constructs a `PhotorealBackend`
+    /// at start. The `modelsDir` must contain the four mlpackages for the LivePortrait kind
+    /// (appearance_v1, motion_v1, warp_v1, generator_v1). When nil, the photoreal path is
+    /// off and Mirror / Mask styles fall back to the stylized 3D head from M56.
+    ///
+    /// **Substitution semantics**: when a backend is loaded and the render style is Mirror
+    /// or Mask, each captured frame's pixel buffer is replaced by the photoreal output before
+    /// the renderer runs. Wireframe style never substitutes — it's the debug view that needs
+    /// to show the operator's actual camera + landmarks alongside a small stylized ghost.
+    ///
+    /// **R12**: the watermarker still signs the substituted frame, the manifest still records
+    /// the session (with `photoreal_active: true` flipped on), and the chirp still plays at
+    /// start. Photoreal does not bypass any disclosure path.
+    public var photorealModelsDir: URL?
+
     public init(mode: PipelineMode = .synthetic,
                 captureWidth: Int = 640,
                 captureHeight: Int = 360,
@@ -90,7 +105,8 @@ public struct PipelineOptions: Sendable {
                 voiceEnabled: Bool = false,
                 voiceLocale: String = "en-US",
                 translationEnabled: Bool = false,
-                translationOptions: TranslationStageOptions? = nil) {
+                translationOptions: TranslationStageOptions? = nil,
+                photorealModelsDir: URL? = nil) {
         self.mode = mode
         self.captureWidth = captureWidth
         self.captureHeight = captureHeight
@@ -110,6 +126,7 @@ public struct PipelineOptions: Sendable {
         self.voiceLocale = voiceLocale
         self.translationEnabled = translationEnabled
         self.translationOptions = translationOptions
+        self.photorealModelsDir = photorealModelsDir
     }
 }
 
@@ -127,11 +144,22 @@ public enum PipelineConfigurationError: Error, CustomStringConvertible, Sendable
     /// `setTranslationEnabled(true, ...)` was called with no `TranslationStageOptions` set
     /// — neither in the previous options nor in the call's `newOptions` param.
     case translationOptionsRequired
+    /// `setPhotorealEnabled(true, modelsDir: nil)` was called with no `modelsDir` set —
+    /// neither in the previous options nor in the call's `modelsDir` param. Distinct from
+    /// "modelsDir doesn't exist on disk" (that lands as `PhotorealBackend.LoadError`).
+    case photorealModelsDirRequired
+    /// `setPhotorealEnabled(true, ...)` was called but no `ConsentedIdentity` is loaded.
+    /// The photoreal path requires a verified identity to drive a generator at all (R1).
+    case photorealIdentityRequired
 
     public var description: String {
         switch self {
         case .translationOptionsRequired:
             return "Pipeline: translation enabled but no TranslationStageOptions provided"
+        case .photorealModelsDirRequired:
+            return "Pipeline: photoreal enabled but no modelsDir provided (need .mlpackages on disk)"
+        case .photorealIdentityRequired:
+            return "Pipeline: photoreal enabled but no ConsentedIdentity is loaded (R1 gate)"
         }
     }
 }
@@ -157,6 +185,14 @@ public actor Pipeline {
     private var renderer: Renderer?
     private var watermarker: Watermarker?
     private var reenactStage: ReenactStage?
+    /// v1.1.0: live photoreal reenactment stage. Constructed inside `run()` (or hot-installed
+    /// via `setPhotorealEnabled`) when an identity + a populated modelsDir are both available.
+    /// Nil when the photoreal path is off (Mirror/Mask fall back to the stylized 3D head).
+    private var photorealStage: PhotorealStage?
+    /// Sticky "photoreal was active at any point this session" flag. Flips true the first time
+    /// the stage has an identity loaded; never resets to false (R2-style disclosure semantics).
+    /// Drives `WatermarkConfig.photoreal_active` at finalize time.
+    private var photorealEverActive: Bool = false
     /// v0.7.0/v0.8.0: live voice + translation stages. Constructed lazily inside `run()` when
     /// the corresponding option is enabled. Lifetime is bounded by the run-loop's cleanup tail.
     private var voiceStage: VoiceStage?
@@ -203,6 +239,10 @@ public actor Pipeline {
     /// M56: hot-swap the consented identity while the pipeline is running. Passing `(nil, nil)`
     /// clears the identity and disables the stylized-head pass. Throws on verification failure;
     /// the previous identity (if any) stays loaded on failure.
+    ///
+    /// v1.1.0: when a photoreal stage is also loaded, the new identity is propagated to it
+    /// (same gate behavior). Clearing the identity also clears the photoreal backend — there
+    /// is no "photoreal without identity" state.
     public func setConsentedIdentity(_ identity: ConsentedIdentity?, pngBytes: Data?) async throws {
         options.consentedIdentity = identity
         options.consentedIdentityPNG = pngBytes
@@ -213,6 +253,65 @@ public actor Pipeline {
                 await stage.clearIdentity()
             }
         }
+        // v1.1.0: keep photoreal stage in lockstep with the canonical identity.
+        if let pstage = photorealStage {
+            if let id = identity, let png = pngBytes, let dir = options.photorealModelsDir {
+                try await pstage.setIdentity(
+                    id,
+                    pngBytes: png,
+                    modelsDir: dir,
+                    runtimeVersion: photorealRuntimeVersion
+                )
+                photorealEverActive = true
+            } else {
+                await pstage.clearIdentity()
+            }
+        }
+    }
+
+    /// v1.1.0: enable or disable the photoreal reenactment path at runtime. When called
+    /// pre-`run()` this updates `options.photorealModelsDir`; the next `run()` honors it.
+    /// When called mid-run:
+    ///   • `on == true`: a stage is constructed (if not already) and the current identity is
+    ///     loaded against the modelsDir. Throws `.photorealIdentityRequired` if no identity is
+    ///     loaded, `.photorealModelsDirRequired` if no modelsDir is provided/set, or rethrows
+    ///     `PhotorealBackend.LoadError` if model load fails.
+    ///   • `on == false`: tears down the stage (idempotent). The manifest's sticky
+    ///     `photoreal_active` flag stays true if photoreal was active at any earlier point.
+    public func setPhotorealEnabled(_ on: Bool, modelsDir: URL?) async throws {
+        if let dir = modelsDir { options.photorealModelsDir = dir }
+        guard !stopped else { return }
+        if on {
+            guard let id = options.consentedIdentity, let png = options.consentedIdentityPNG else {
+                throw PipelineConfigurationError.photorealIdentityRequired
+            }
+            guard let dir = options.photorealModelsDir else {
+                throw PipelineConfigurationError.photorealModelsDirRequired
+            }
+            let stage = photorealStage ?? PhotorealStage()
+            try await stage.setIdentity(
+                id,
+                pngBytes: png,
+                modelsDir: dir,
+                runtimeVersion: photorealRuntimeVersion
+            )
+            self.photorealStage = stage
+            self.photorealEverActive = true
+            await refreshManifestWatermark()
+        } else {
+            if let stage = photorealStage {
+                await stage.clearIdentity()
+                self.photorealStage = nil
+            }
+            await refreshManifestWatermark()
+        }
+    }
+
+    /// Runtime version string handed to `PhotorealBackend` for the bundle-scope gate. Keeps
+    /// the Pipeline from importing FaceReenactor's static directly across the dependency
+    /// boundary — the constant lives in MirrorMeshReenact.
+    private var photorealRuntimeVersion: String {
+        FaceReenactor.runtimeVersion
     }
 
     /// v0.7.0: install/clear the transcript fan-out callback. Mirrors `setOnRender`/`setOnCapture`.
@@ -324,11 +423,16 @@ public actor Pipeline {
         guard let writer = manifestWriter else { return }
         let current = await writer.currentManifest
         let chirp = options.voiceEnabled || options.translationEnabled
+        // Sticky-true: once photoreal has been active at any point, the manifest carries
+        // photoreal_active=true for the rest of the session even if the operator toggles
+        // it back off. Matches the disclosure-class semantics of voice_transformed.
+        let photoreal = photorealEverActive || (photorealStage != nil)
         let updated = WatermarkConfig(
             visible: current.pipeline.watermark.visible,
             signed: current.pipeline.watermark.signed,
             audible_chirp: chirp,
-            voice_transformed: options.translationEnabled
+            voice_transformed: options.translationEnabled,
+            photoreal_active: photoreal
         )
         var newPipeline = current.pipeline
         newPipeline.watermark = updated
@@ -408,6 +512,51 @@ public actor Pipeline {
             }
         }
 
+        // v1.1.0: instantiate the photoreal reenactment stage when both an identity AND a
+        // populated modelsDir are configured. Failure to load (verifier rejects, weights
+        // missing, mlpackage compile error) is logged as a warning — the pipeline continues
+        // with the stylized 3D head pass as the fallback path. This mirrors the philosophy
+        // of the reenactStage block above: a misconfigured photoreal path never blocks the
+        // operator from running a session.
+        if let id = options.consentedIdentity,
+           let png = options.consentedIdentityPNG,
+           let dir = options.photorealModelsDir {
+            // Quickly check the four expected mlpackages are present before constructing
+            // the backend. The backend will check too, but doing it here keeps the
+            // telemetry message clear ("not found" vs "compile failed").
+            let expected = PhotorealBackend.modelFileNames(for: .liveportrait)
+            let allPresent = expected.allSatisfy { name in
+                FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path)
+            }
+            if allPresent {
+                let pstage = PhotorealStage()
+                do {
+                    try await pstage.setIdentity(
+                        id,
+                        pngBytes: png,
+                        modelsDir: dir,
+                        runtimeVersion: photorealRuntimeVersion
+                    )
+                    self.photorealStage = pstage
+                    self.photorealEverActive = true
+                    await Telemetry.shared.emit(.annotation(
+                        key: "reenact.photoreal.stage",
+                        value: "loaded:liveportrait"
+                    ))
+                } catch {
+                    await Telemetry.shared.emit(.warning(
+                        stage: .render,
+                        message: "Photoreal backend load failed (\(error)); falling back to stylized 3D head"
+                    ))
+                }
+            } else {
+                await Telemetry.shared.emit(.warning(
+                    stage: .render,
+                    message: "Photoreal modelsDir set but not all mlpackages present at \(dir.path); falling back"
+                ))
+            }
+        }
+
         // ── manifest ───────────────────────────────────────────────
         let consent = ConsentRecord(
             scheme: .selfAsSource,
@@ -443,7 +592,11 @@ public actor Pipeline {
                 visible: true,
                 signed: true,
                 audible_chirp: options.voiceEnabled || options.translationEnabled,
-                voice_transformed: options.translationEnabled
+                voice_transformed: options.translationEnabled,
+                // v1.1.0: record whether the photoreal stage was loaded at session start.
+                // Sticky-true semantics: once `photorealEverActive` flips, it stays flipped,
+                // so a session that runs photoreal even briefly carries the disclosure.
+                photoreal_active: photorealEverActive
             )
         )
         // M55: bind the loaded ConsentedIdentity into the manifest. SHA-256 over canonical header
@@ -607,12 +760,47 @@ public actor Pipeline {
                 }
             }
 
+            // v1.1.0: photoreal substitution. When a backend is loaded AND we're rendering in
+            // a non-Wireframe style (Mirror or Mask), the photoreal output REPLACES the camera
+            // pixel buffer that gets handed to the renderer. The substitution happens upstream
+            // of render so:
+            //   • The renderer's existing passthrough pipeline draws the photoreal face as the
+            //     base layer (where the camera image used to be).
+            //   • The stylized 3D head overlay is suppressed for substituted frames — the
+            //     photoreal frame IS the face, doubling up would look broken.
+            //   • Landmark / mesh overlays still draw on top, anchored to the original capture's
+            //     landmark coords (the photoreal face occupies the same pixel space).
+            //   • Watermark / manifest / chirp paths are unchanged — the watermarker signs the
+            //     final rendered output, the manifest records the session with photoreal_active,
+            //     and the chirp (if voice/translation is active) still plays. R12: no bypass.
+            //
+            // Wireframe is the debug view; substituting would hide the camera + landmarks + the
+            // small stylized ghost that's its whole point. We explicitly skip the substitution
+            // path when `isWireframeStyle == true`.
+            var renderInput: CapturedFrame = captured
+            var renderStylizedPayload: Renderer.StylizedHeadPayload? = stylizedPayload
+            if options.rendererOptions.isWireframeStyle == false,
+               let pstage = self.photorealStage {
+                let active = await pstage.hasIdentity
+                if active {
+                    if let substituted = await pstage.apply(captured) {
+                        renderInput = captured.with(pixelBuffer: substituted)
+                        // Photoreal output replaces the face — drop the stylized head overlay
+                        // for this frame so we don't composite a second face on top.
+                        renderStylizedPayload = nil
+                    }
+                    // hasIdentity is sticky-true once flipped, so any tick where the stage is
+                    // present means the manifest should carry photoreal_active.
+                    self.photorealEverActive = true
+                }
+            }
+
             // Render
             let renderStart = MirrorMeshCore.hostTimeNs()
-            guard let rendered = renderer.render(captured: captured,
+            guard let rendered = renderer.render(captured: renderInput,
                                                   landmarks: landmarks,
                                                   blendshapes: blendshapes,
-                                                  stylizedHead: stylizedPayload) else {
+                                                  stylizedHead: renderStylizedPayload) else {
                 await Telemetry.shared.emit(.warning(stage: .render, message: "render returned nil"))
                 // Close pipeline signpost on early-out so Instruments doesn't show an open interval.
                 Signpost.end(Signpost.pipeline, frame: captured.frameID, id: pipelineSp)
@@ -683,6 +871,19 @@ public actor Pipeline {
             await refreshManifestWatermark()
             await tstage.stop()
             self.translationStage = nil
+        }
+        // v1.1.0: photoreal teardown. The sticky `photorealEverActive` flag carries the
+        // disclosure into the manifest finalization regardless of whether the stage was
+        // toggled off mid-session. We only call refresh here when photoreal was actually
+        // involved this session — an unconditional refresh would overwrite the voice/
+        // chirp disclosure that was seeded at start for the case where voice startup
+        // failed (see VoiceTranslationIntegrationTests.translationFlagAlsoFlipsChirpEvenWhenVoiceStartupFails).
+        if let pstage = photorealStage {
+            await pstage.clearIdentity()
+            self.photorealStage = nil
+        }
+        if photorealEverActive {
+            await refreshManifestWatermark()
         }
         // Finalize recorder before manifest so the .mov is closed when the manifest references it.
         if let recorder { try await recorder.finalize() }
