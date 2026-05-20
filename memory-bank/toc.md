@@ -25,15 +25,23 @@
 - [`build-deployment.md`](./build-deployment.md) — Build, sign, notarize, CI, release
 - [`testing-patterns.md`](./testing-patterns.md) — Test categories, fixtures, discipline
 
+## Resume
+
+- [`../RESUME.md`](../RESUME.md) — one-screen resume statement for fresh sessions / post-compact recovery
+
 ## Tasks
 
 - [`tasks/2026-05/README.md`](./tasks/2026-05/README.md) — May 2026 task index
+- [`tasks/2026-05/250519_session-arc.md`](./tasks/2026-05/250519_session-arc.md) — full play-by-play of 2026-05-19 (v0.1.0 → v0.6.0 kickoff)
 
 ## Releases
 
 - [`release/v0.1.0/readme.md`](./release/v0.1.0/readme.md) — v0.1.0 "First Light" — ✅ delivered 2026-05-19
 - [`release/v0.2.0/readme.md`](./release/v0.2.0/readme.md) — v0.2.0 "Living Window" — ✅ delivered 2026-05-19
 - [`release/v0.3.0/readme.md`](./release/v0.3.0/readme.md) — v0.3.0 "Ship It" — ✅ delivered 2026-05-19
+- [`release/v0.4.0/readme.md`](./release/v0.4.0/readme.md) — v0.4.0 "Sustainable" — ✅ delivered 2026-05-19
+- [`release/v0.5.0/readme.md`](./release/v0.5.0/readme.md) — v0.5.0 "Presence" — ✅ delivered 2026-05-19
+- [`release/v0.6.0/readme.md`](./release/v0.6.0/readme.md) — v0.6.0 "Identity" — 🟡 in progress (M43, M55 landed; M56 FOMM next)
 
 ## Logs
 
