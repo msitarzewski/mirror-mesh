@@ -3,7 +3,7 @@ using namespace metal;
 
 // Uniforms for the triangulated face-mesh pass. `style` controls fragment behaviour:
 //   0 = wireframe (output only on triangle edges via barycentric coords)
-//   1 = filled    (solid color across the triangle)
+//   1 = filled    (shaded color with screen-space normal lighting)
 struct FaceMeshUniforms {
     float4 color;
     uint   style;
@@ -18,6 +18,7 @@ struct FaceMeshVOut {
     float4 color;
     uint   style;
     float  edgeFeather;
+    float2 facePos;   // landmark position in normalized [0,1] image space (for shading gradient)
 };
 
 // `landmarks` is a flat buffer of 76 float2s in normalized image space (origin top-left).
@@ -49,16 +50,37 @@ vertex FaceMeshVOut face_mesh_vertex(uint vid [[vertex_id]],
     out.color = u.color;
     out.style = u.style;
     out.edgeFeather = feather;
+    out.facePos = uv;
     return out;
 }
 
 fragment float4 face_mesh_fragment(FaceMeshVOut in [[stage_in]]) {
     if (in.style == 1u) {
-        // Filled mode: solid color, optional alpha from uniform.
-        return in.color;
+        // Filled mode: depth-cue shading via screen-space derivatives + a synthetic light from
+        // upper-left so the mesh reads as a face surface, not a flat sticker. We compute a
+        // "normal" from how facePos changes across the fragment — flat regions stay bright,
+        // angled regions darken. Combined with a vertical gradient for forehead-to-chin shading.
+        float2 dx = dfdx(in.facePos);
+        float2 dy = dfdy(in.facePos);
+        // Approximate a 3D normal: triangle steepness in screen space proxies for face curvature.
+        float steepness = length(dx) + length(dy);
+        float curvature = clamp(1.0 - steepness * 80.0, 0.55, 1.0);
+
+        // Vertical gradient: brighter at the top (forehead lit), warmer at the bottom (chin shadow).
+        float vert = 1.0 - in.facePos.y;
+        float topLight = 0.85 + 0.30 * smoothstep(0.3, 0.9, vert);
+
+        // Soft fade at the silhouette edge so the mesh blends with the actual face beneath it
+        // instead of appearing as a hard-edged sticker.
+        float edgeDist = min(in.bary.x, min(in.bary.y, in.bary.z));
+        float edgeFade = smoothstep(0.0, 0.18, edgeDist);
+
+        float shading = curvature * topLight;
+        float3 rgb = in.color.rgb * shading;
+        float alpha = in.color.a * (0.55 + 0.35 * edgeFade);
+        return float4(rgb, alpha);
     }
     // Wireframe mode: keep fragments near any of the three triangle edges.
-    // Edge distance = the smallest barycentric coord (rises from 0 on an edge).
     float d = min(in.bary.x, min(in.bary.y, in.bary.z));
     float a = 1.0 - smoothstep(0.0, in.edgeFeather, d);
     if (a <= 0.001) discard_fragment();
