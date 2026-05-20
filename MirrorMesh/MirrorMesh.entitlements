@@ -2,11 +2,40 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!--
+	  App Sandbox is intentionally DISABLED in v1.0.0.
+
+	  Why: Apple's on-device SFSpeechRecognizer historically interacts with
+	  daemon services that not all sandbox configurations grant access to.
+	  Until the Voice → Pipeline integration is shipped (post-v1.0; see
+	  RESUME.md), we keep sandbox off so a voice-pipeline regression isn't
+	  hidden by an opaque sandbox denial.
+
+	  Trade-off documented: Developer ID signed + Hardened Runtime + notarized
+	  is the trust envelope we ship. Sandboxing is an additional layer we
+	  WILL enable in v1.1 once the voice path has been confirmed compatible
+	  with `app-sandbox=true`. See ADR work item in `memory-bank/decisions.md`.
+	-->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
+
+	<!-- Camera capture for AVCaptureSession. Pairs with NSCameraUsageDescription. -->
+	<key>com.apple.security.device.camera</key>
+	<true/>
+
+	<!-- Microphone for SFSpeechRecognizer / AVAudioEngine. Pairs with NSMicrophoneUsageDescription. -->
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
-	<key>com.apple.security.device.camera</key>
+
+	<!--
+	  Outbound network access for the Ollama loopback client (default
+	  http://localhost:11434). This is the ONLY network entitlement we
+	  grant; we explicitly do NOT grant network.server because nothing in
+	  MirrorMesh listens on a socket. The R3 invariant (local-only
+	  inference) is enforced by *what we connect to*, not by the
+	  entitlement — projectRules.md R3.
+	-->
+	<key>com.apple.security.network.client</key>
 	<true/>
 </dict>
 </plist>

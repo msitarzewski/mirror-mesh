@@ -12,6 +12,13 @@ public struct SessionManifest: Codable, Sendable, Equatable {
     public var frame_count: Int
     public var public_key_b64: String
     public var manifest_signature_b64: String?
+    /// v0.6.0: SHA-256 of the loaded `ConsentedIdentity` bundle (canonical header JSON || PNG
+    /// bytes). Present only when an identity is loaded for the session. Binds the rendered output
+    /// to the specific .mmid bundle that authorized it — a downstream verifier can prove which
+    /// signed identity drove this session.
+    /// Optional + additive: pre-v0.6 manifests decode cleanly because the JSON decoder treats
+    /// missing optional fields as nil.
+    public var identity_sha256: String?
 
     public init(manifest_version: String = MirrorMeshWatermark.manifestVersion,
                 session_id: String = UUID().uuidString,
@@ -23,7 +30,8 @@ public struct SessionManifest: Codable, Sendable, Equatable {
                 consent: ConsentRecord,
                 frame_count: Int = 0,
                 public_key_b64: String,
-                manifest_signature_b64: String? = nil) {
+                manifest_signature_b64: String? = nil,
+                identity_sha256: String? = nil) {
         self.manifest_version = manifest_version
         self.session_id = session_id
         self.started_at = started_at
@@ -35,6 +43,7 @@ public struct SessionManifest: Codable, Sendable, Equatable {
         self.frame_count = frame_count
         self.public_key_b64 = public_key_b64
         self.manifest_signature_b64 = manifest_signature_b64
+        self.identity_sha256 = identity_sha256
     }
 }
 

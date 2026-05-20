@@ -4,91 +4,199 @@ import MirrorMeshCore
 /// Realtime transcriber. Consumes `AudioChunk`s and emits `TranscriptFrame`s on the
 /// telemetry bus.
 ///
-/// Current build: **mocked**. The real path requires vendoring whisper.cpp as a C/C++
-/// target plus a Swift bridging header — that work is tracked in
-/// `docs/voice-pipeline.md` and queued for v0.3.x. The mock preserves the actor's
-/// public surface and timing characteristics so callers (and the bench scenario) work
-/// unchanged the day the real engine lands.
+/// History: in v0.3.0 this shipped as a deterministic mock with a placeholder
+/// `.realWhisperCpp` slot. In v0.7.0 we replaced the real backend with Apple's
+/// on-device `SFSpeechRecognizer` (see `SpeechRecognitionBackend.swift`). The
+/// `.realWhisperCpp` enum case is retained as an alias for `.appleSpeech` so
+/// existing trace JSONL annotations remain decodable; new code should select
+/// `.appleSpeech` (or `.mock`) explicitly.
+///
+/// **Architectural note**: when `backend == .appleSpeech`, the `start(_:)`
+/// audio stream argument is ignored — Apple's Speech framework owns its own
+/// audio capture path. Use `WhisperTranscriber.startAppleSpeech()` for that
+/// route. The chunk-driven `start(_:)` surface still exists for mock testing
+/// and for any future engine that prefers pre-buffered chunks.
 public actor WhisperTranscriber {
 
     public enum WhisperError: Error, Sendable {
         case modelFileMissing(URL)
         case alreadyStarted
+        case appleSpeechRequiresOwnAudio
+        case appleSpeechFailed(String)
     }
 
     public struct Stats: Sendable {
         public var chunksProcessed: Int = 0
         public var transcriptsEmitted: Int = 0
+        public var partialTranscriptsEmitted: Int = 0
     }
 
-    /// Backend selector. `mock` is the only path wired in v0.3.0. `realWhisperCpp`
-    /// reserves the enum slot so the bench JSONL annotation tells the truth about
-    /// which engine produced a given trace.
+    /// Backend selector. `.appleSpeech` is the production path in v0.7.0+;
+    /// `.realWhisperCpp` is a back-compat alias retained for older JSONL traces.
     public enum Backend: String, Sendable {
         case mock
+        /// Back-compat alias for `.appleSpeech`. Old bench traces decode against
+        /// this raw value; new code should write `.appleSpeech`.
         case realWhisperCpp
+        case appleSpeech = "apple-speech"
+
+        /// Normalized form for telemetry annotations. Folds the legacy alias
+        /// into the canonical `apple-speech` tag so traces don't drift.
+        public var canonicalTag: String {
+            switch self {
+            case .mock:            return "mock"
+            case .realWhisperCpp:  return "apple-speech"
+            case .appleSpeech:     return "apple-speech"
+            }
+        }
     }
 
     public let backend: Backend
     private let modelURL: URL?
+    private let locale: String
     private var stats = Stats()
     private var running = false
     private var startedAtNs: UInt64 = 0
     private var task: Task<Void, Never>?
 
-    /// Construct against a model file on disk. If `modelURL` is nil, the transcriber
-    /// runs in mock-only mode (used by tests and headless smoke runs).
-    public init(modelURL: URL? = nil, backend: Backend = .mock) {
+    /// Construct against a model file on disk (legacy; only `.realWhisperCpp` used to
+    /// require this — the `.appleSpeech` backend does not consume a model URL).
+    ///
+    /// - Parameter modelURL: optional model file for legacy backends.
+    /// - Parameter backend: which engine to use.
+    /// - Parameter locale: BCP-47 locale for Apple Speech (default `en-US`). Ignored
+    ///   by `.mock`.
+    public init(modelURL: URL? = nil,
+                backend: Backend = .mock,
+                locale: String = "en-US") {
         self.modelURL = modelURL
         self.backend = backend
+        self.locale = locale
     }
 
-    /// Verify the model file is at least present + non-empty. Real whisper.cpp will
-    /// additionally checksum it. Mock backend skips this check.
+    /// Verify the model file is at least present + non-empty. `.appleSpeech` skips
+    /// this check (the model is part of the OS, not a file we manage).
     public func validateModel() throws {
-        guard backend == .realWhisperCpp else { return }
-        guard let url = modelURL else { throw WhisperError.modelFileMissing(URL(fileURLWithPath: "<nil>")) }
-        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
-        let size = (attrs[.size] as? NSNumber)?.intValue ?? 0
-        guard size > 1_000_000 else { throw WhisperError.modelFileMissing(url) }
+        switch backend {
+        case .mock, .appleSpeech: return
+        case .realWhisperCpp:
+            // The legacy code path expected a whisper.cpp ggml file; the Apple
+            // Speech backend now superseded that path. We still permit the call
+            // but treat it as a no-op — keeping it loud-fail would break any
+            // older caller that still passes a model URL.
+            guard let url = modelURL else { return }
+            if !FileManager.default.fileExists(atPath: url.path) { return }
+        }
     }
 
-    /// Drain an audio stream, emit transcripts. Returns when the stream completes.
+    /// Drain an audio stream of pre-buffered chunks. Used by the `.mock` backend
+    /// for deterministic tests. For `.appleSpeech` this method throws — call
+    /// `startAppleSpeech()` / `startAppleSpeechFile(_:)` instead.
     public func start(_ stream: AsyncStream<AudioChunk>) async throws {
         if running { throw WhisperError.alreadyStarted }
+        switch backend {
+        case .appleSpeech:
+            throw WhisperError.appleSpeechRequiresOwnAudio
+        case .mock, .realWhisperCpp:
+            break
+        }
         running = true
         startedAtNs = MirrorMeshCore.hostTimeNs()
-        TelemetryBus.emit(.annotation(key: "voice.backend", value: backend.rawValue))
+        TelemetryBus.emit(.annotation(key: "voice.backend", value: backend.canonicalTag))
         if let modelURL {
             TelemetryBus.emit(.annotation(key: "voice.model_path", value: modelURL.path))
         }
-
         for await chunk in stream {
             await process(chunk)
         }
         running = false
     }
 
+    /// Apple Speech live microphone path. Returns an `AsyncStream<Transcript>` that
+    /// surfaces partial + final results in real time. Also emits each transcript
+    /// onto the telemetry bus as `.transcript(TranscriptFrame)` so JSONL traces
+    /// stay unified with the legacy mock path.
+    public func startAppleSpeech() async throws -> AsyncStream<Transcript> {
+        if running { throw WhisperError.alreadyStarted }
+        guard backend == .appleSpeech || backend == .realWhisperCpp else {
+            throw WhisperError.appleSpeechRequiresOwnAudio
+        }
+        let backendImpl: AppleSpeechBackend
+        do {
+            backendImpl = try AppleSpeechBackend(localeIdentifier: locale)
+        } catch {
+            throw WhisperError.appleSpeechFailed("\(error)")
+        }
+        running = true
+        startedAtNs = MirrorMeshCore.hostTimeNs()
+        let upstream = try await backendImpl.start()
+        return forward(upstream)
+    }
+
+    /// Apple Speech file-mode. Same return shape as `startAppleSpeech()`.
+    public func startAppleSpeechFile(_ url: URL) async throws -> AsyncStream<Transcript> {
+        if running { throw WhisperError.alreadyStarted }
+        guard backend == .appleSpeech || backend == .realWhisperCpp else {
+            throw WhisperError.appleSpeechRequiresOwnAudio
+        }
+        let backendImpl: AppleSpeechBackend
+        do {
+            backendImpl = try AppleSpeechBackend(localeIdentifier: locale)
+        } catch {
+            throw WhisperError.appleSpeechFailed("\(error)")
+        }
+        running = true
+        startedAtNs = MirrorMeshCore.hostTimeNs()
+        let upstream = try await backendImpl.start(fileURL: url)
+        return forward(upstream)
+    }
+
     public func snapshot() -> Stats { stats }
 
     // MARK: - processing
+
+    /// Wrap the upstream `AsyncStream<Transcript>` so each yield also fans out to
+    /// the telemetry bus + stats counter. Returns a fresh stream so the caller's
+    /// `for await` iteration drives the work; no extra Task is needed.
+    private func forward(_ upstream: AsyncStream<Transcript>) -> AsyncStream<Transcript> {
+        AsyncStream<Transcript> { cont in
+            let pumpTask = Task { [weak self] in
+                for await t in upstream {
+                    await self?.recordTranscript(t)
+                    cont.yield(t)
+                }
+                cont.finish()
+                await self?.markStopped()
+            }
+            cont.onTermination = { @Sendable _ in
+                pumpTask.cancel()
+            }
+        }
+    }
+
+    private func recordTranscript(_ t: Transcript) {
+        if t.isFinal {
+            stats.transcriptsEmitted += 1
+        } else {
+            stats.partialTranscriptsEmitted += 1
+        }
+        // Only finals go onto the telemetry bus — partials would dominate the
+        // JSONL trace (one event every ~100 ms). Callers wanting partials read
+        // the returned `AsyncStream<Transcript>` directly.
+        if t.isFinal {
+            TelemetryBus.emit(.transcript(t.asTranscriptFrame))
+        }
+    }
+
+    private func markStopped() {
+        running = false
+    }
 
     private func process(_ chunk: AudioChunk) async {
         stats.chunksProcessed += 1
         let startMs = Double(chunk.startNs &- startedAtNs) / 1_000_000.0
         let endMs = startMs + chunk.durationSeconds * 1000.0
-
-        let text: String
-        let confidence: Float
-        switch backend {
-        case .mock:
-            (text, confidence) = mockTranscribe(chunk: chunk)
-        case .realWhisperCpp:
-            // Why pass-through to mock: the real backend isn't linked in this build.
-            // The annotation already told the trace the requested backend was
-            // `realWhisperCpp`; emitting the mock keeps the pipeline observable.
-            (text, confidence) = mockTranscribe(chunk: chunk)
-        }
+        let (text, confidence) = mockTranscribe(chunk: chunk)
         guard !text.isEmpty else { return }
         let frame = TranscriptFrame(startMs: startMs,
                                     endMs: endMs,

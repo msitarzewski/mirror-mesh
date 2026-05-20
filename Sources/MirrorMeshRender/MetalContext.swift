@@ -45,7 +45,7 @@ public final class MetalContext {
 
         // CommandLineTools-only hosts have no .metallib at build time; compile at runtime
         // from the .metal sources packaged as Bundle.module resources.
-        let sources = ["Passthrough", "LandmarkSprite", "AvatarMask", "FaceMesh"]
+        let sources = ["Passthrough", "LandmarkSprite", "AvatarMask", "FaceMesh", "StylizedHead"]
         var combined = ""
         for name in sources {
             // .copy("Shaders") preserves the subdirectory in the bundle. The earlier .process

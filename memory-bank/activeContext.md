@@ -1,32 +1,36 @@
 # MirrorMesh — Active Context
 
-**Updated**: 2026-05-19 (end of long session — v0.6.0 in flight)
-**Current state machine position**: `BUILD` (v0.6.0 — M56 next)
-**Substate**: `IDLE` (handoff point — see `RESUME.md` at repo root)
+**Updated**: 2026-05-20 (end of finish-the-project loop)
+**Current state machine position**: `IDLE` (v1.0.0 ship-ready, blocked only on user-supplied notarization credentials)
+**Substate**: `IDLE`
 
 ---
 
 ## Current Focus
 
-**v0.6.0 "Identity" — in progress 2026-05-19**
+**v0.6.0 "Identity" — ✅ COMPLETE 2026-05-19**
 
-Theme: real face-reenactment on Apple Silicon. The "wear a different face" magic from Arlo Gilbert's deepfake-warning video, rebuilt with MirrorMesh's trust layer intact.
+M43 + M52 + M53 + M55 + M56 + M57 + M58 + M59 all shipped via three parallel agents + orchestrator integration. Test count 66/17 → 110/23.
 
-What's landed in v0.6.0 so far:
-- **M43** — Camera-as-PIP overlay (`OperatorPIPView`). Pipeline gained `setOnCapture(_:)`; PipelineViewModel exposes `latestCapturedFrame`. PIP visible in Mirror/Mask styles only. Layout matches the LinkedIn inspiration but inverted ethics — operator small, synthetic puppet hero.
-- **M55** — `ConsentedIdentity` Codable struct + bundle format + Ed25519-signed verifier. `IdentityConsentText.v1` is the disclosure subjects sign. 6-test suite covers signed-bundle-verifies / tampered-png-rejected / tampered-header-rejected / out-of-scope-rejected / write+read-roundtrip / disclosure-hash-stable.
+Pivot taken (per user's "we can always fix things"): M56 ships as a **stylized parameterized head** driven by 76-point landmarks, license-clean and `.stylizedNonHuman`-scheme-aligned. The FOMM photoreal path is scaffolded but requires manual weight download (models/training/README.md). The stylized path renders today.
 
-What's next in v0.6.0 (single big rock):
-- **M56** — FOMM CoreML port. New `MirrorMeshReenact` module. Three CoreML submodels (keypoint / motion / generator). `FaceReenactor` actor refuses to load without a verified `ConsentedIdentity`. Pipeline gains a `ReenactStage` between Vision and Render. See `RESUME.md` for the kickoff recipe.
+Wave 1 deliverables:
+- `Sources/MirrorMeshReenact/` — FaceReenactor actor, StylizedHead (266 verts, 18 blendshapes), ReenactStage, PhotorealBackend stub
+- `Sources/MirrorMeshRender/Shaders/StylizedHead.metal` + `StylizedHeadRenderer.swift` — Pixar-stylized faceted fill with cyan rim light, edge fade
+- `Sources/mirrormesh-consent/` — CLI producing signed .mmid bundles; R1 guard requires literal `--consent-confirm` phrase for third-party
+- `Sources/MirrorMeshAppKit/IdentityInspector.swift` — settings panel section with NSOpenPanel + verifier
+- `Sources/MirrorMeshAppKit/DisclosureChirp.swift` — A4→E5 sine sweep on real session start, locked-on in release
+- `models/external/fomm/` — vendored FOMM source (MIT) with provenance; LivePortrait rejected for InsightFace research-only weight dep
+- Renderer.render() gains optional stylizedHead payload; Pipeline ReenactStage between solver and render
 
-Other v0.6.0 pending:
-- **M52** App icon refresh to mesh motif (~15 min)
-- **M53** Mask polish — hide cartoon `AvatarMask` in non-Wireframe styles (~15 min)
-- **M57** `mirrormesh-consent` CLI — blocked on M55 ✅ now unblocked
-- **M58** Identity-load UX in app — blocked on M56
-- **M59** Audible disclosure chirp
+**v0.7.0/v0.8.0/v0.9.0/v1.0.0 — in flight 2026-05-19 (Wave 2)**
 
-Status board: `memory-bank/release/v0.6.0/readme.md`.
+Three parallel agents dispatched:
+- **v0.7.0 "Voice"**: Apple on-device Speech framework replacing the mock Whisper backend
+- **v0.8.0 "Accessibility"**: multilingual lip-sync — Ollama translation + AVSpeechSynthesizer + audio-amplitude → blendshape driver feeding the stylized head from v0.6.0
+- **v0.9.0/v1.0.0**: ASSETS-targeted paper draft + RELEASE_NOTES_v1.0.0.md + README.md rewrite + CONSENT_PROTOCOL.md
+
+Status boards: `memory-bank/release/v0.7.0/readme.md`, `v0.8.0/readme.md`, `v0.9.0/readme.md`, `v1.0.0/readme.md`.
 
 ## Releases delivered today
 

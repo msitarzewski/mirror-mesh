@@ -36,10 +36,40 @@ public struct WatermarkConfig: Codable, Sendable, Equatable {
     public var visible: Bool
     public var signed: Bool
     public var audible_chirp: Bool
-    public init(visible: Bool, signed: Bool, audible_chirp: Bool) {
+    /// v0.8.0: true when the session ran with translation active (Ollama-driven
+    /// translation + AVSpeechSynthesizer TTS + lip-sync overlay). The avatar's
+    /// mouth no longer matches what the operator silently mouthed — disclosure
+    /// is mandatory (R2). Optional in Codable: pre-v0.7 manifests decode cleanly
+    /// because `init(from:)` supplies `false` when the key is missing.
+    public var voice_transformed: Bool
+
+    public init(visible: Bool,
+                signed: Bool,
+                audible_chirp: Bool,
+                voice_transformed: Bool = false) {
         self.visible = visible
         self.signed = signed
         self.audible_chirp = audible_chirp
+        self.voice_transformed = voice_transformed
+    }
+
+    // Custom decode so pre-v0.7 manifests (no voice_transformed key) round-trip
+    // cleanly. The synthesized decoder would throw on missing required keys; we
+    // make it optional + defaulted instead. Re-encoding writes the new key, so
+    // re-serializing an old manifest upgrades its on-disk shape.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.visible = try container.decode(Bool.self, forKey: .visible)
+        self.signed = try container.decode(Bool.self, forKey: .signed)
+        self.audible_chirp = try container.decode(Bool.self, forKey: .audible_chirp)
+        self.voice_transformed = try container.decodeIfPresent(Bool.self, forKey: .voice_transformed) ?? false
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case visible
+        case signed
+        case audible_chirp
+        case voice_transformed
     }
 }
 

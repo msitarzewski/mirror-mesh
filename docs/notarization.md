@@ -4,10 +4,17 @@ MirrorMesh ships a notarized, stapled `MirrorMesh.app` so Gatekeeper accepts
 it on a fresh Mac without right-click-open gymnastics. This page documents the
 one-time setup (per maintainer) and the per-release recipe.
 
-The automation lives in [`bench/scripts/notarize.sh`](../bench/scripts/notarize.sh)
-and [`bench/scripts/export-options.plist`](../bench/scripts/export-options.plist).
+The maintainer-facing one-shot automation is in
+[`scripts/release/`](../scripts/release/) — `archive.sh` + `notarize.sh` + a
+one-page recipe at [`scripts/release/README.md`](../scripts/release/README.md).
+The historical / lower-level scripts are at
+[`bench/scripts/notarize.sh`](../bench/scripts/notarize.sh) and
+[`bench/scripts/export-options.plist`](../bench/scripts/export-options.plist);
+the new `scripts/release/notarize.sh` reuses the same notarytool / stapler
+flow and the same export-options template under the hood.
 The release workflow ([`.github/workflows/release.yml`](../.github/workflows/release.yml))
-calls the same script when the right secrets are configured on the repo.
+calls the maintainer scripts when the right secrets are configured on the
+repo.
 
 ## Prerequisites
 

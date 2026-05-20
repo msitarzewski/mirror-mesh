@@ -1,136 +1,143 @@
 # MirrorMesh
 
-![CI](https://github.com/<user>/<repo>/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](./LICENSE)
 [![Commercial license available](https://img.shields.io/badge/commercial-available-green.svg)](./COMMERCIAL.md)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-black.svg)](./memory-bank/decisions.md)
+[![DCO](https://img.shields.io/badge/DCO-required-orange.svg)](./CONTRIBUTING.md)
 
-> **Maintainers**: replace `<user>/<repo>` in the CI badge URL with the actual GitHub `owner/repository` once this project is published. See [`docs/ci.md`](./docs/ci.md).
+> **Maintainers**: replace `<owner>/<repo>` in the CI badge URL with the actual GitHub `owner/repository` once the project is published. See [`docs/ci.md`](./docs/ci.md).
 
-**Open realtime telepresence research for Apple Silicon. Local-only inference. Watermarked by default. Consent-gated by design.**
+**Realtime expressive telepresence for Apple Silicon, with consent and disclosure built into the architecture.** MirrorMesh ships the same realtime face-reenactment mechanics as a generic deepfake stack, but with a Consent-First Identity Protocol at the load gate, layered cryptographic disclosure on every frame, and an audible signal at every session start. Software defaults are policy. We set the policy to consent.
 
 ---
 
-## What this is
+## What does it look like
 
-> Modern Apple Silicon equipped only with integrated HD cameras can achieve low-latency realtime facial reenactment and expressive avatarization — with local-only inference, built-in cryptographic disclosure, and no specialized motion-capture hardware.
+Demo media: see [`assets/demo.mp4`](./assets/demo.mp4) once recorded; until then, the live `mirrormesh-app` window is the demo. Screenshots in [`docs/screenshots/`](./docs/screenshots/).
 
-The pipeline: **Camera → Apple Vision landmarks → blendshape solver → Metal renderer → visible watermark + Ed25519 frame signing + signed session manifest → screen / `.mov`**.
+The shipped app shows your face transformed in the hero view, the source camera as a small picture-in-picture inset, a telemetry panel with per-stage P50/P95/P99 latency histograms, and a watermark hero card with a pulsing green dot when signing is live.
 
-End-to-end latency on the reference Mac (M5 Max, macOS 26.5): **P50 1.4 ms** (synthetic landmarks) / **P50 5.1 ms** (real Vision on the procedural fixture).
+## Quick start
 
-## What this is not
-
-- Not an impersonation toolkit
-- Not an ID-verification bypass tool
-- Not a celebrity / public-figure cloning system
-- Not a hidden / undisclosed synthetic media generator
-
-The constraints are enforced architecturally, not just in the license — see [`memory-bank/projectRules.md`](./memory-bank/projectRules.md).
-
-## Quickstart
-
-Requires macOS 14+, Apple Silicon, and Xcode (full install — Command Line Tools alone is no longer enough as of v0.2.0; see [ADR-0012](./memory-bank/decisions.md)).
+Requires macOS 14+, Apple Silicon, and a full Xcode install (Command Line Tools alone is no longer sufficient as of v0.2.0; see [ADR-0012](./memory-bank/decisions.md)).
 
 ```bash
-# One-time: point swift at Xcode
-sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-# Or, per-invocation:
-#   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-
-git clone <repo> mirror-mesh && cd mirror-mesh
-
+git clone https://github.com/<owner>/mirror-mesh.git && cd mirror-mesh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 swift build
-swift test                                                    # 44 tests, 13 suites
-swift run mirrormesh-app                                      # opens an NSWindow
+swift test --skip MirrorMeshStreamTests --skip MirrorMeshVoiceTests --skip MirrorMeshVirtualCameraTests --skip MirrorMeshMediaPipeTests
+swift run mirrormesh-app
+```
+
+Headless variants (no camera needed):
+
+```bash
+# All-synthetic, watermarked, signed manifest
 swift run mirrormesh-bench --scenario bench/scenarios/demo.json
 swift run mirrormesh-verify --manifest bench/out/demo_*.manifest.json
-python3 bench/scripts/summarize.py bench/out/demo_*.jsonl
-```
 
-To exercise the real-Vision path against the bundled procedural fixture (no camera required):
-
-```bash
+# Real Apple Vision against the bundled procedural fixture
 swift run mirrormesh-bench --scenario bench/scenarios/fixture.json
-```
 
-To record a watermarked `.mov`:
-
-```bash
+# Record a watermarked .mov + sidecar manifest
 swift run mirrormesh-bench --scenario bench/scenarios/recorded.json
-open bench/out/recorded_*.mov   # plays in QuickTime; badge visible
+open bench/out/recorded_*.mov
 ```
 
-## What you'll see
+## Why does this exist
 
-- The bench CLIs produce JSONL traces in `bench/out/`. `bench/scripts/summarize.py` and `bench/scripts/figures.py` (matplotlib) turn them into per-stage P50/P95/P99 tables and PDFs in `docs/figures/`.
-- Every output frame carries a visible "MIRRORMESH • SYNTHETIC" badge + an Ed25519 signature; tampering with the manifest causes `mirrormesh-verify` to exit non-zero. See `docs/demo.md`.
-- The SwiftUI app (`mirrormesh-app`) shows a live `MTKView` preview, a telemetry panel with per-stage latency histograms, and a consent flow before any session starts.
+A widely-shared 2025 demo showed a male operator wearing a synthetic blonde "influencer" puppet in a live video swap, billed as *catfishing on steroids*. The mechanics that produce that demo are also the mechanics that enable real accessibility wins: gaze correction for people who lose eye contact while reading the screen, expression amplification for users with facial paralysis, and multilingual visual lip-sync for cross-language deaf-hearing communication. The technology is dual-use. The policy question is what software does **by default**.
+
+We take the position that the appropriate default for identity-transforming media is consent at the load gate, disclosure on every frame, and provenance in every recorded artifact — encoded so they cannot be flipped off with a flag. Constraints by architecture, not by license.
 
 ## Architecture
 
 ```
 Capture (AVFoundation / Synthetic / File)
-  → Vision (Apple Vision face landmarks + One-Euro smoothing / Synthetic)
-  → Solver (Geometric / CoreML, both conform to ExpressionSolver)
-  → Render (Metal — passthrough + landmark overlay + stylized avatar mask)
-  → Watermark (visible badge + Ed25519 frame signing)
-  → Output (screen / virtual camera [v0.3.0] / .mov recorder / WebRTC [v0.3.0])
-  ╰── Session manifest (signed, tamper-evident)
-  ╰── JSONL telemetry trace (per-stage timings)
-  ╰── Instruments os_signpost intervals
+  → Vision (Apple Vision 76-pt landmarks + One-Euro filter / MediaPipe 468-pt)
+  → Solver (Geometric closed-form / CoreML MLP, both conform to ExpressionSolver)
+  → Reenact (Stylized 266-vertex procedural head / FOMM photoreal — consent-gated)
+  → Render (Metal — Passthrough + Landmarks + Mesh + AvatarMask + Style picker)
+  → Watermark (Visible badge + Ed25519 frame signature)
+  → Output (Screen / .mov Recorder / Virtual camera CMIOExtension / WebRTC send)
+  ╰── Session manifest (signed JSON, tamper-evident)
+  ╰── JSONL telemetry trace + Instruments os_signpost intervals
+  ╰── Audible disclosure chirp (session start)
 ```
 
-Modules live under `Sources/`:
+**Modules** (under `Sources/`):
 
 | Module | Role |
 |--------|------|
-| `MirrorMeshCore` | Frame types, telemetry actor, JSONL logger, signposts, pixel-buffer pool |
-| `MirrorMeshCapture` | `FrameSource` protocol; `Live`/`Synthetic`/`File` sources |
-| `MirrorMeshVision` | Vision landmark extractor + One-Euro filter |
-| `MirrorMeshSolver` | `ExpressionSolver` protocol; geometric + CoreML implementations |
-| `MirrorMeshRender` | Metal renderer with overlay compositors |
-| `MirrorMeshWatermark` | Ed25519 frame signer, visible badge, signed manifest |
-| `MirrorMeshRecorder` | `AVAssetWriter`-based watermarked `.mov` recorder |
+| `MirrorMeshCore` | Frame types, telemetry actor, JSONL logger, signposts |
+| `MirrorMeshCapture` | `FrameSource` protocol; Live, Synthetic, File sources |
+| `MirrorMeshVision` | Apple Vision landmarks + One-Euro smoother |
+| `MirrorMeshMediaPipe` | 468-pt MediaPipe backend (Vision-fallback in v1.0) |
+| `MirrorMeshSolver` | `ExpressionSolver`; Geometric + CoreML implementations |
+| `MirrorMeshReenact` | Stylized 3D head puppet + `PhotorealBackend` (FOMM scaffold) |
+| `MirrorMeshRender` | Metal renderer; Wireframe / Mirror / Mask styles |
+| `MirrorMeshWatermark` | Ed25519 signer, badge, manifest, `ConsentedIdentity` |
+| `MirrorMeshRecorder` | `AVAssetWriter`-based watermarked `.mov` |
+| `MirrorMeshVirtualCamera` | `CMIOExtension` scaffolding |
+| `MirrorMeshStream` | WebRTC send-only (opt-in target) |
+| `MirrorMeshVoice` | `MicrophoneSource` + `WhisperTranscriber` |
+| `MirrorMeshTranslate` | Local Ollama LLM client |
 | `MirrorMeshOutput` | Top-level `Pipeline` orchestrator |
-| `MirrorMeshAppKit` | SwiftUI views consumed by the `mirrormesh-app` executable |
+| `MirrorMeshAppKit` | SwiftUI library + disclosure chirp |
 
-## Layout
+**Performance** (Mac17,6 / Apple M5 Max / macOS 26.5):
 
-```
-Sources/           Swift modules + executables (bench, verify, app, selftest, fixture-gen)
-Tests/             Swift Testing suites + Fixtures/
-shaders/           Metal source (under Sources/MirrorMeshRender/Shaders)
-bench/             Scenarios, scripts (perf + power + figures), outputs
-models/            CoreML packages + provenance sidecars + training scripts
-docs/              demo.md, instruments.md, power-methodology.md, ci.md, figures/, screenshots/
-memory-bank/       AGENTS.md framework, ADRs, release roadmaps
-.github/workflows/ CI + release pipelines
-```
+| Scenario | Mode | E2E P50 ms |
+|----------|------|-----------:|
+| `demo.json` | synthetic | **1.4** |
+| `fixture.json` | file → real Apple Vision | **5.1** |
+| Live camera + Vision (interactive) | live | **~11** |
 
-## Releases & roadmap
+Full per-stage tables in [`paper/draft_v1.md`](./paper/draft_v1.md) Section 6.4.
 
-- **v0.1.0** "First Light" — ✅ end-to-end pipeline on synthetic frames, signed manifest, JSONL bench. [Roadmap](./memory-bank/release/v0.1.0/readme.md)
-- **v0.2.0** "Living Window" — ✅ real Xcode tests, app executable, live camera UI, frame recorder, real-face fixture, signposts, power bench, CoreML solver scaffolding, CI, figures. [Roadmap](./memory-bank/release/v0.2.0/readme.md)
-- **v0.3.0** (planned) — notarized `.app` bundle, virtual camera (`CMIOExtension`), WebRTC streaming, MediaPipe comparison, real trained CoreML weights, voice pipeline.
+## The trust layer
 
-## Documentation
+Every frame leaving the renderer carries:
 
-- [`docs/demo.md`](./docs/demo.md) — what the demo does and how to read its output
-- [`docs/instruments.md`](./docs/instruments.md) — interpreting the `.trace` lanes
-- [`docs/power-methodology.md`](./docs/power-methodology.md) — `powermetrics` recipe
-- [`docs/figures.md`](./docs/figures.md) — paper-figure regeneration
-- [`docs/ci.md`](./docs/ci.md) — CI pipeline reference
-- [`memory-bank/`](./memory-bank/) — Memory Bank (AGENTS.md v2.2) + ADRs
+1. **Visible "MIRRORMESH • SYNTHETIC" badge** composited into the frame
+2. **64-byte Ed25519 signature** over `(frameID ‖ hostTimeNs ‖ SHA-256(BGRA pixels))` — `Sources/MirrorMeshWatermark/FrameSigner.swift:20-32`
+3. **Signed session manifest** (canonical JSON, sorted keys, ISO-8601 dates) recording device, pipeline config, models with provenance, frame count, and consent record — verifiable via `mirrormesh-verify`
+4. **Audible chirp** at session start (A4 → E5, 250 ms, locked-on in release builds)
+
+Identity transformations additionally require a verified `ConsentedIdentity` bundle (`.mmid`):
+
+- Ed25519-signed JSON header + PNG payload
+- Three identity schemes: `.selfAsSource`, `.stylizedNonHuman`, `.consentedThirdParty`
+- Scope grammar `vX.Y+` enforces runtime-version compatibility
+- The reenactor refuses to initialize without verification — `Sources/MirrorMeshReenact/FaceReenactor.swift:56-72`
+- The third-party CLI flow requires a literal consent phrase — `Sources/mirrormesh-consent/ConsentCLI.swift:55-70`
+
+The full protocol spec is in [`docs/CONSENT_PROTOCOL.md`](./docs/CONSENT_PROTOCOL.md).
+
+## Project status
+
+**v1.0.0 candidate.** Production-ready for: the synthetic mesh-overlay path (Wireframe / Mirror / Mask styles), the stylized procedural head reenactor, the consent bundle protocol, the layered watermark, the recorder, the bench harness, and the CLI tools. Alpha for: the FOMM photoreal path (load gate complete, inference graph wiring is v1.1), `whisper.cpp` (mock backend ships; real `.cxxTarget` lands v1.1), MediaPipe (Vision-fallback ships; XCFramework lands v1.1), C2PA emission, multi-face tracking.
+
+Full known-limitations list in [`RELEASE_NOTES_v1.0.0.md`](./RELEASE_NOTES_v1.0.0.md).
+
+## Contribute
+
+PRs welcome. We use [DCO sign-off](./CONTRIBUTING.md) (Linux-kernel-style); no CLA. Every commit needs `git commit -s`.
+
+The project's load-bearing rules live in [`memory-bank/projectRules.md`](./memory-bank/projectRules.md) — please read R1 (no third-party identity spoofing), R2 (watermarking mandatory), R3 (local-only inference), and R12 (refuse-on-sight list) before opening a PR that touches the trust layer.
 
 ## License
 
-MirrorMesh is **dual-licensed**:
+**Dual-licensed**:
 
-- **[AGPL-3.0](./LICENSE)** for open-source use — clone, fork, redistribute under the terms of AGPL-3.0. Researchers, academics, hobbyists, and anyone happy to release derivatives under AGPL are covered for free. The "A" closes the SaaS loophole that plain GPL has.
-- **[Commercial license](./COMMERCIAL.md)** for closed-source / proprietary / non-AGPL-compatible use — separate paid agreement with the maintainer.
+- **[AGPL-3.0](./LICENSE)** for open-source use. Researchers, academics, hobbyists, and anyone happy to release derivatives under AGPL are covered for free. AGPL §13 closes the SaaS loophole.
+- **[Commercial license](./COMMERCIAL.md)** for closed-source or proprietary use that can't satisfy AGPL terms — separate paid agreement with the maintainer.
 
-The MirrorMesh constraints (watermark on by default, no third-party impersonation, consent gating) live in [`projectRules.md`](./memory-bank/projectRules.md) and the architecture itself — **not** in removable license terms. Every commercial license carries them as contractual obligations.
+The trust-layer invariants are architectural and survive both license tracks. Every commercial license carries them as contractual obligations.
 
-Contributing: see [`CONTRIBUTING.md`](./CONTRIBUTING.md). DCO sign-off (`git commit -s`) on every commit. No CLA required.
+History: Apache-2.0 in v0.1.0 through v0.3.0; relicensed AGPL-3.0 + commercial at v0.4.0 ([ADR-0014](./memory-bank/decisions.md)).
 
-History: the project was Apache-2.0 through v0.3.0; relicensed to AGPL-3.0 + Commercial at v0.4.0 kickoff (see [ADR-0014](./memory-bank/decisions.md)).
+---
+
+*Realtime telepresence with the receipts. © 2026 Michael Sitarzewski.*

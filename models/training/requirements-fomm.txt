@@ -1,0 +1,32 @@
+# Conversion-time dependencies for models/training/fomm_to_coreml.py.
+#
+# Kept separate from models/training/requirements.txt (which pins the
+# blendshape-solver script's exact stack at torch 2.7.1 / coremltools 8.3.0)
+# because the FOMM conversion exercises a different surface of coremltools'
+# torch frontend and benefits from a newer combination.
+#
+# Pinned reasons:
+#   - torch >= 2.4 — vox-cpk checkpoints contain pickled subclasses that
+#     `torch.load(..., weights_only=False)` handles correctly from 2.4+.
+#   - coremltools >= 9.0 — needed for the FLOAT16 compute_precision knob
+#     used in the conversion call and for stable mlprogram tracing of
+#     F.grid_sample (the dense-motion / generator hot path).
+#   - numpy < 2 — coremltools 9.0 still ships C extensions linked against
+#     numpy 1.x's ABI; numpy 2.0 changed long-double handling and triggers
+#     an ImportError at coremltools import time on Python 3.11.
+#   - scikit-image — FOMM's frames_dataset and image-preprocessing helpers
+#     pull skimage; not needed for inference-only conversion strictly, but
+#     vendored util touches edge cases that bring it in. Cheap to install.
+#   - pyyaml — config loading if the user later edits the script to consume
+#     upstream FOMM config/*.yaml directly.
+#
+# Install once with:
+#   /opt/homebrew/bin/python3.11 -m pip install -r models/training/requirements-fomm.txt
+#
+# python3.11 — NOT python3.14. See script docstring for rationale.
+
+torch>=2.4
+coremltools>=9.0
+numpy<2
+scikit-image>=0.22
+pyyaml>=6.0

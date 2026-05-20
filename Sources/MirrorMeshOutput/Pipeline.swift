@@ -7,6 +7,9 @@ import MirrorMeshRender
 import MirrorMeshWatermark
 import MirrorMeshRecorder
 import MirrorMeshVirtualCamera
+import MirrorMeshReenact
+import MirrorMeshVoice
+import MirrorMeshTranslate
 
 /// Choose how the pipeline ingests frames and how it produces landmarks.
 public enum PipelineMode: Sendable {
@@ -48,6 +51,26 @@ public struct PipelineOptions: Sendable {
     /// traces and solver-comparison runs enable it because the payload (52 floats per frame)
     /// dominates the JSONL volume.
     public var logCoefficients: Bool
+    /// M56: optional verified identity bundle. When both fields are non-nil and the pair verifies
+    /// at start, the pipeline composites a stylized 3D head driven by the live landmark stream.
+    public var consentedIdentity: ConsentedIdentity?
+    public var consentedIdentityPNG: Data?
+
+    /// v0.7.0 voice integration. When true, the pipeline spins up a `VoiceStage` that drives the
+    /// on-device Apple Speech recognizer for transcripts. Manifest's `audible_chirp` is forced
+    /// true (R2 disclosure).
+    public var voiceEnabled: Bool
+    /// BCP-47 locale used to construct the speech backend. Honored only when `voiceEnabled`.
+    public var voiceLocale: String
+    /// v0.8.0 translation integration. When true, the pipeline spins up a `TranslationPipelineStage`
+    /// that consumes voice transcripts, drives Ollama → AVSpeechSynthesizer → LipSyncDriver, and
+    /// applies the resulting mouth-region overlay to each rendered frame. Implies `voiceEnabled`
+    /// at runtime (the pipeline will turn it on if you forget); manifest's `voice_transformed`
+    /// flips true on first overlay produced.
+    public var translationEnabled: Bool
+    /// Options for the translation stage. Required when `translationEnabled`; ignored otherwise.
+    /// Carries source/target locale, Ollama config, TTS config, and lip-sync smoothing options.
+    public var translationOptions: TranslationStageOptions?
 
     public init(mode: PipelineMode = .synthetic,
                 captureWidth: Int = 640,
@@ -61,7 +84,13 @@ public struct PipelineOptions: Sendable {
                 landmarkBackend: (any LandmarkBackend)? = nil,
                 landmarkBackendTag: String? = nil,
                 virtualCameraEnabled: Bool = false,
-                logCoefficients: Bool = false) {
+                logCoefficients: Bool = false,
+                consentedIdentity: ConsentedIdentity? = nil,
+                consentedIdentityPNG: Data? = nil,
+                voiceEnabled: Bool = false,
+                voiceLocale: String = "en-US",
+                translationEnabled: Bool = false,
+                translationOptions: TranslationStageOptions? = nil) {
         self.mode = mode
         self.captureWidth = captureWidth
         self.captureHeight = captureHeight
@@ -75,6 +104,12 @@ public struct PipelineOptions: Sendable {
         self.landmarkBackendTag = landmarkBackendTag
         self.virtualCameraEnabled = virtualCameraEnabled
         self.logCoefficients = logCoefficients
+        self.consentedIdentity = consentedIdentity
+        self.consentedIdentityPNG = consentedIdentityPNG
+        self.voiceEnabled = voiceEnabled
+        self.voiceLocale = voiceLocale
+        self.translationEnabled = translationEnabled
+        self.translationOptions = translationOptions
     }
 }
 
@@ -84,6 +119,21 @@ public struct PipelineResult: Sendable {
     public let endToEndP50Ms: Double
     public let endToEndP95Ms: Double
     public let endToEndP99Ms: Double
+}
+
+/// Configuration errors raised by `Pipeline` when the requested option combination is
+/// inconsistent. Distinct from runtime errors (capture, vision, etc.) so callers can branch.
+public enum PipelineConfigurationError: Error, CustomStringConvertible, Sendable, Equatable {
+    /// `setTranslationEnabled(true, ...)` was called with no `TranslationStageOptions` set
+    /// — neither in the previous options nor in the call's `newOptions` param.
+    case translationOptionsRequired
+
+    public var description: String {
+        switch self {
+        case .translationOptionsRequired:
+            return "Pipeline: translation enabled but no TranslationStageOptions provided"
+        }
+    }
 }
 
 /// End-to-end orchestrator: capture → vision → solver → render → watermark.
@@ -100,8 +150,21 @@ public actor Pipeline {
     /// Why: M43 PIP — the SwiftUI camera-as-PIP overlay needs the raw `CapturedFrame` before
     /// rendering applies any synthetic styling, so the operator can verify themselves.
     private var onCapture: (@Sendable (CapturedFrame) -> Void)?
+    /// v0.7.0: every transcript from the active VoiceStage fans out here for the UI / captions.
+    private var onTranscript: (@Sendable (Transcript) -> Void)?
+    /// v0.8.0: every successful translation fans out here for the UI / captions.
+    private var onTranslation: (@Sendable (String) -> Void)?
     private var renderer: Renderer?
     private var watermarker: Watermarker?
+    private var reenactStage: ReenactStage?
+    /// v0.7.0/v0.8.0: live voice + translation stages. Constructed lazily inside `run()` when
+    /// the corresponding option is enabled. Lifetime is bounded by the run-loop's cleanup tail.
+    private var voiceStage: VoiceStage?
+    private var translationStage: TranslationPipelineStage?
+    /// Manifest writer held so `setTranslationEnabled` can hot-update the manifest when
+    /// translation is toggled mid-session. Pre-`run()` this is nil; the in-memory option flag
+    /// still flips, but the persisted manifest is updated on the next finalize.
+    private var manifestWriter: ManifestWriter?
 
     public init(options: PipelineOptions,
                 manifestURL: URL,
@@ -135,6 +198,141 @@ public actor Pipeline {
     /// ignores attempts to disable it (per projectRules R2).
     public func setWatermarkVisible(_ visible: Bool) {
         watermarker?.visible = visible
+    }
+
+    /// M56: hot-swap the consented identity while the pipeline is running. Passing `(nil, nil)`
+    /// clears the identity and disables the stylized-head pass. Throws on verification failure;
+    /// the previous identity (if any) stays loaded on failure.
+    public func setConsentedIdentity(_ identity: ConsentedIdentity?, pngBytes: Data?) async throws {
+        options.consentedIdentity = identity
+        options.consentedIdentityPNG = pngBytes
+        if let stage = reenactStage {
+            if let id = identity, let png = pngBytes {
+                try await stage.setIdentity(id, pngBytes: png)
+            } else {
+                await stage.clearIdentity()
+            }
+        }
+    }
+
+    /// v0.7.0: install/clear the transcript fan-out callback. Mirrors `setOnRender`/`setOnCapture`.
+    public func setOnTranscript(_ cb: (@Sendable (Transcript) -> Void)?) async {
+        self.onTranscript = cb
+        if let stage = voiceStage {
+            await stage.setOnTranscript(makeTranscriptForwarder())
+        }
+    }
+
+    /// v0.8.0: install/clear the translation-result fan-out callback. The orchestrator surfaces
+    /// the translated string to the captions UI without coupling AppKit to MirrorMeshTranslate.
+    public func setOnTranslation(_ cb: (@Sendable (String) -> Void)?) async {
+        self.onTranslation = cb
+        if let stage = translationStage {
+            await stage.setOnTranslation(cb)
+        }
+    }
+
+    /// v0.7.0: enable/disable voice capture at runtime. When called pre-`run()` this only
+    /// updates the option flag; the next `run()` honors it. When called mid-run with the
+    /// pipeline active, the stage is brought up / torn down in place. Throws if voice
+    /// startup fails (locale unsupported, permission denied, audio engine failure).
+    public func setVoiceEnabled(_ on: Bool) async throws {
+        options.voiceEnabled = on
+        // Mid-run flip — only valid when the pipeline is already mid-loop. Pre-run flips just
+        // update options and let `run()` honour them.
+        guard !stopped else { return }
+        if on && voiceStage == nil {
+            try await startVoiceStage()
+        } else if !on, let stage = voiceStage {
+            await stage.stop()
+            self.voiceStage = nil
+        }
+    }
+
+    /// v0.8.0: enable/disable translation at runtime. Updates the manifest's watermark config
+    /// in-place when toggled mid-run, so the persisted record reflects the policy in force at
+    /// each transition. Pre-`run()` just updates the option flag. Throws when translation
+    /// is requested without `options.translationOptions` set.
+    public func setTranslationEnabled(_ on: Bool,
+                                       options newOptions: TranslationStageOptions? = nil) async throws {
+        if let new = newOptions { options.translationOptions = new }
+        options.translationEnabled = on
+        guard !stopped else { return }
+
+        if on {
+            // Translation depends on voice being on for the transcript stream. Lift voice
+            // implicitly if it isn't already — the alternative (refuse) leaves the user with
+            // a non-functional translation toggle.
+            if voiceStage == nil {
+                options.voiceEnabled = true
+                try await startVoiceStage()
+            }
+            guard let topts = options.translationOptions else {
+                throw PipelineConfigurationError.translationOptionsRequired
+            }
+            if translationStage == nil {
+                let stage = TranslationPipelineStage(options: topts)
+                await stage.setOnTranslation(self.onTranslation)
+                self.translationStage = stage
+                // Re-route the transcript forwarder so finals reach the new translation stage.
+                if let vs = voiceStage {
+                    await vs.setOnTranscript(makeTranscriptForwarder())
+                }
+            } else {
+                await translationStage?.updateOptions(topts)
+            }
+            // R2/R12: update the manifest in-place so the persisted record carries the new
+            // disclosure (audible_chirp: true, voice_transformed: true) from this point onward.
+            await refreshManifestWatermark()
+        } else {
+            if let stage = translationStage {
+                await stage.stop()
+                self.translationStage = nil
+            }
+            await refreshManifestWatermark()
+        }
+    }
+
+    // MARK: - Internal helpers (voice/translation glue)
+
+    private func startVoiceStage() async throws {
+        let stage = try VoiceStage(locale: options.voiceLocale)
+        try await stage.start()
+        await stage.setOnTranscript(makeTranscriptForwarder())
+        self.voiceStage = stage
+    }
+
+    /// Build a fan-out callback that:
+    ///   1. forwards every transcript to the orchestrator's `onTranscript` (if set)
+    ///   2. forwards finalized transcripts to the active translation stage (if enabled)
+    /// Re-built on every wiring change so the closure captures the latest stage references.
+    private func makeTranscriptForwarder() -> @Sendable (Transcript) -> Void {
+        let userCallback = self.onTranscript
+        let translation = self.translationStage
+        return { transcript in
+            userCallback?(transcript)
+            if transcript.isFinal, let translation {
+                // Translation stage spawns its own task; this call is non-blocking.
+                translation.translate(transcript.text)
+            }
+        }
+    }
+
+    /// Re-encode the manifest's `watermark` block from current options so a hot toggle is
+    /// reflected in the persisted record. No-op pre-`run()` (writer is nil).
+    private func refreshManifestWatermark() async {
+        guard let writer = manifestWriter else { return }
+        let current = await writer.currentManifest
+        let chirp = options.voiceEnabled || options.translationEnabled
+        let updated = WatermarkConfig(
+            visible: current.pipeline.watermark.visible,
+            signed: current.pipeline.watermark.signed,
+            audible_chirp: chirp,
+            voice_transformed: options.translationEnabled
+        )
+        var newPipeline = current.pipeline
+        newPipeline.watermark = updated
+        await writer.updatePipeline(newPipeline)
     }
 
     public func run() async throws -> PipelineResult {
@@ -194,6 +392,22 @@ public actor Pipeline {
         let watermarker = Watermarker(signer: signer, badge: badge)
         self.watermarker = watermarker
 
+        // M56: instantiate the reenactment stage and (if configured) load the identity. Failure
+        // to verify is a load-time refusal (R12) — pipeline continues without a reenactor and
+        // emits a telemetry warning so the operator can investigate.
+        let reenactStage = ReenactStage()
+        self.reenactStage = reenactStage
+        if let id = options.consentedIdentity, let png = options.consentedIdentityPNG {
+            do {
+                try await reenactStage.setIdentity(id, pngBytes: png)
+            } catch {
+                await Telemetry.shared.emit(.warning(
+                    stage: .solver,
+                    message: "Identity bundle rejected: \(error)"
+                ))
+            }
+        }
+
         // ── manifest ───────────────────────────────────────────────
         let consent = ConsentRecord(
             scheme: .selfAsSource,
@@ -220,16 +434,73 @@ public actor Pipeline {
             ),
             solver: SolverConfig(type: options.solverKind.rawValue, calibration_frames: 30),
             render: RenderConfig(overlay: ["landmarks", "avatar_mask"]),
-            watermark: WatermarkConfig(visible: true, signed: true, audible_chirp: false)
+            // R2 disclosure: chirp is mandatory whenever voice OR translation is active.
+            // R12: the chirp is locked-on whenever translation is on (see AppSettings docs); the
+            // manifest reflects whatever the *runtime* policy ended up doing, so we record true.
+            // `voice_transformed` is sticky-true for the rest of the session once translation
+            // produces any output; here we seed it from the option flag at start.
+            watermark: WatermarkConfig(
+                visible: true,
+                signed: true,
+                audible_chirp: options.voiceEnabled || options.translationEnabled,
+                voice_transformed: options.translationEnabled
+            )
         )
+        // M55: bind the loaded ConsentedIdentity into the manifest. SHA-256 over canonical header
+        // JSON (signature-stripped, sorted keys) concatenated with PNG bytes — same input the
+        // bundle verifier hashed at load time. Downstream verifiers can re-derive this value
+        // from the .mmid bundle they retrieve out-of-band and confirm it drove this session.
+        let identitySHA256: String? = {
+            guard let id = options.consentedIdentity, let png = options.consentedIdentityPNG else {
+                return nil
+            }
+            return ConsentedIdentityVerifier.canonicalSHA256(identity: id, pngBytes: png)
+        }()
         let manifest = SessionManifest(
             started_at: Date(),
             device: DeviceInfo.current(),
             pipeline: pipelineCfg,
             consent: consent,
-            public_key_b64: signer.publicKey.base64EncodedString()
+            public_key_b64: signer.publicKey.base64EncodedString(),
+            identity_sha256: identitySHA256
         )
         let writer = ManifestWriter(url: manifestURL, signer: signer, manifest: manifest)
+        self.manifestWriter = writer
+
+        // ── voice + translation (v0.7 + v0.8) ───────────────────────
+        // Voice first because translation depends on the transcript stream. If voice fails to
+        // start (permission denied, locale unsupported, audio engine failure), translation is
+        // implicitly disabled — surfaced as a telemetry warning, not a hard failure, so the rest
+        // of the pipeline still runs.
+        if options.voiceEnabled || options.translationEnabled {
+            do {
+                try await startVoiceStage()
+            } catch {
+                await Telemetry.shared.emit(.warning(
+                    stage: .vision,  // no .voice stage id today; reuse .vision
+                    message: "voice stage start failed: \(error)"
+                ))
+                // Disable both — translation can't operate without transcripts.
+                options.voiceEnabled = false
+                options.translationEnabled = false
+            }
+        }
+        if options.translationEnabled, let topts = options.translationOptions {
+            let tstage = TranslationPipelineStage(options: topts)
+            await tstage.setOnTranslation(self.onTranslation)
+            self.translationStage = tstage
+            // Re-route the transcript forwarder so the voice → translate edge is live.
+            if let vs = voiceStage {
+                await vs.setOnTranscript(makeTranscriptForwarder())
+            }
+        } else if options.translationEnabled {
+            // Enabled but no options provided — degrade gracefully + warn.
+            await Telemetry.shared.emit(.warning(
+                stage: .solver,
+                message: "translation enabled but TranslationStageOptions is nil; disabling"
+            ))
+            options.translationEnabled = false
+        }
 
         // Optional .mov recorder — attached only when recorderURL is set.
         let recorder: VideoRecorder? = try options.recorderURL.map { url in
@@ -305,11 +576,43 @@ public actor Pipeline {
                 }
             }
 
+            // M56: reenactment stage between solver and render. Pass-through when no identity
+            // is loaded (the existing landmark/mesh overlays still render). The stage is cheap
+            // when active (~sub-ms geometric solver) and a no-op when idle.
+            //
+            // v0.8.0: if a translation stage is active, fetch the current lip-sync overlay and
+            // merge it into the reenacted frame's mouth-region coefficients BEFORE the payload
+            // is built. Pose channels and non-mouth blendshapes pass through untouched — the
+            // operator's silent face still drives everything above the mouth.
+            var stylizedPayload: Renderer.StylizedHeadPayload? = nil
+            if let lf = landmarks {
+                let reenacted = await reenactStage.apply(lf)
+                if var frame = reenacted.frame {
+                    if let tstage = self.translationStage,
+                       let model = await reenactStage.currentModel() {
+                        let overlay = tstage.currentOverlay(at: lf.hostTimeNs)
+                        if !overlay.values.isEmpty {
+                            frame = frame.overlayLipSync(overlay.values, using: model)
+                        }
+                    }
+                    stylizedPayload = Renderer.StylizedHeadPayload(
+                        vertices: frame.vertices,
+                        normals: frame.normals,
+                        indices: frame.indices,
+                        yaw: frame.coefficients[.headYaw] ?? 0,
+                        pitch: frame.coefficients[.headPitch] ?? 0,
+                        roll: frame.coefficients[.headRoll] ?? 0,
+                        landmarkBoundingBoxNorm: lf.faceBoundingBoxNorm
+                    )
+                }
+            }
+
             // Render
             let renderStart = MirrorMeshCore.hostTimeNs()
             guard let rendered = renderer.render(captured: captured,
                                                   landmarks: landmarks,
-                                                  blendshapes: blendshapes) else {
+                                                  blendshapes: blendshapes,
+                                                  stylizedHead: stylizedPayload) else {
                 await Telemetry.shared.emit(.warning(stage: .render, message: "render returned nil"))
                 // Close pipeline signpost on early-out so Instruments doesn't show an open interval.
                 Signpost.end(Signpost.pipeline, frame: captured.frameID, id: pipelineSp)
@@ -361,10 +664,31 @@ public actor Pipeline {
         }
 
         await frameSource.stop()
+        // Tear down voice + translation BEFORE finalizing the manifest so the writer's last
+        // updatePipeline sees the truthiest values.
+        if let vs = voiceStage {
+            await vs.stop()
+            self.voiceStage = nil
+        }
+        // v0.8.0: `voice_transformed` is sticky-true if the translation stage produced any
+        // overlay during the session. We re-check here so a session that started with the
+        // toggle off but had it flipped on mid-run still records the disclosure correctly.
+        if let tstage = translationStage {
+            if tstage.isActive {
+                // refreshManifestWatermark uses option flags; ensure the option reflects
+                // the runtime fact before we refresh.
+                options.voiceEnabled = true
+                options.translationEnabled = true
+            }
+            await refreshManifestWatermark()
+            await tstage.stop()
+            self.translationStage = nil
+        }
         // Finalize recorder before manifest so the .mov is closed when the manifest references it.
         if let recorder { try await recorder.finalize() }
         virtualCamera?.stop()
         try await writer.finalize()
+        self.manifestWriter = nil
         jsonlSink?.flush()
 
         return PipelineResult(
@@ -378,5 +702,14 @@ public actor Pipeline {
 
     public func stop() {
         stopped = true
+        // Voice + translation stages are also drained by the run-loop's cleanup tail when it
+        // observes `stopped`; cancelling here lets the frame source's pending wait return
+        // sooner. Stages are idempotent against double-stop.
+        let vs = self.voiceStage
+        let ts = self.translationStage
+        Task {
+            await vs?.stop()
+            await ts?.stop()
+        }
     }
 }

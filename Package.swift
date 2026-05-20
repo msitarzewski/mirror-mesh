@@ -33,6 +33,8 @@ let package = Package(
         .library(name: "MirrorMeshAppKit", targets: ["MirrorMeshAppKit"]),
         .library(name: "MirrorMeshStream", targets: ["MirrorMeshStream"]),
         .library(name: "MirrorMeshVoice", targets: ["MirrorMeshVoice"]),
+        .library(name: "MirrorMeshReenact", targets: ["MirrorMeshReenact"]),
+        .library(name: "MirrorMeshTranslate", targets: ["MirrorMeshTranslate"]),
         .executable(name: "mirrormesh-bench", targets: ["mirrormesh-bench"]),
         .executable(name: "mirrormesh-verify", targets: ["mirrormesh-verify"]),
         .executable(name: "mirrormesh-selftest", targets: ["mirrormesh-selftest"]),
@@ -40,6 +42,8 @@ let package = Package(
         .executable(name: "mirrormesh-fixture-gen", targets: ["mirrormesh-fixture-gen"]),
         .executable(name: "mirrormesh-stream", targets: ["mirrormesh-stream"]),
         .executable(name: "mirrormesh-listen", targets: ["mirrormesh-listen"]),
+        .executable(name: "mirrormesh-consent", targets: ["mirrormesh-consent"]),
+        .executable(name: "mirrormesh-translate", targets: ["mirrormesh-translate"]),
     ],
     dependencies: [
         // Pre-built libwebrtc binary Swift package (Apache 2.0). Opt-in: only MirrorMeshStream
@@ -107,6 +111,11 @@ let package = Package(
                 "MirrorMeshWatermark",
                 "MirrorMeshRecorder",
                 "MirrorMeshVirtualCamera",
+                "MirrorMeshReenact",
+                // v0.7/v0.8 integration: pipeline owns VoiceStage + TranslationPipelineStage.
+                // Voice listens on the mic, Translate drives the lip-sync overlay.
+                "MirrorMeshVoice",
+                "MirrorMeshTranslate",
             ],
             path: "Sources/MirrorMeshOutput"
         ),
@@ -134,6 +143,9 @@ let package = Package(
                 "MirrorMeshRender",
                 "MirrorMeshWatermark",
                 "MirrorMeshOutput",
+                "MirrorMeshReenact",
+                "MirrorMeshVoice",
+                "MirrorMeshTranslate",
             ],
             path: "Sources/MirrorMeshAppKit"
         ),
@@ -217,7 +229,13 @@ let package = Package(
         ),
         .testTarget(
             name: "MirrorMeshOutputTests",
-            dependencies: ["MirrorMeshOutput"],
+            dependencies: [
+                "MirrorMeshOutput",
+                // VoiceStage / TranslationPipelineStage tests directly construct backends + transports.
+                "MirrorMeshVoice",
+                "MirrorMeshTranslate",
+                "MirrorMeshReenact",
+            ],
             path: "Tests/MirrorMeshOutputTests"
         ),
         .testTarget(
@@ -290,6 +308,51 @@ let package = Package(
             name: "MirrorMeshAppKitTests",
             dependencies: ["MirrorMeshAppKit", "MirrorMeshCore"],
             path: "Tests/MirrorMeshAppKitTests"
+        ),
+
+        // ── Identity reenactment (v0.6.0 M56) ───────────────────────────
+        .target(
+            name: "MirrorMeshReenact",
+            dependencies: [
+                "MirrorMeshCore",
+                "MirrorMeshWatermark",
+                "MirrorMeshVision",
+            ],
+            path: "Sources/MirrorMeshReenact"
+        ),
+        .testTarget(
+            name: "MirrorMeshReenactTests",
+            dependencies: ["MirrorMeshReenact", "MirrorMeshWatermark", "MirrorMeshCore"],
+            path: "Tests/MirrorMeshReenactTests"
+        ),
+
+        // ── ConsentedIdentity bundle CLI (M57) ──────────────────────────
+        .executableTarget(
+            name: "mirrormesh-consent",
+            dependencies: ["MirrorMeshCore", "MirrorMeshWatermark"],
+            path: "Sources/mirrormesh-consent"
+        ),
+        .testTarget(
+            name: "mirrormeshConsentTests",
+            dependencies: ["mirrormesh-consent", "MirrorMeshWatermark"],
+            path: "Tests/mirrormeshConsentTests"
+        ),
+
+        // ── Multilingual lip-sync translation (v0.8.0 M66–M69) ──────────
+        .target(
+            name: "MirrorMeshTranslate",
+            dependencies: ["MirrorMeshCore", "MirrorMeshReenact"],
+            path: "Sources/MirrorMeshTranslate"
+        ),
+        .executableTarget(
+            name: "mirrormesh-translate",
+            dependencies: ["MirrorMeshCore", "MirrorMeshTranslate"],
+            path: "Sources/mirrormesh-translate"
+        ),
+        .testTarget(
+            name: "MirrorMeshTranslateTests",
+            dependencies: ["MirrorMeshTranslate", "MirrorMeshReenact", "MirrorMeshCore"],
+            path: "Tests/MirrorMeshTranslateTests"
         ),
     ]
 )

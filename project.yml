@@ -75,6 +75,12 @@ targets:
         com.apple.security.device.camera: true
         com.apple.security.device.audio-input: true
         com.apple.security.app-sandbox: false
+        # Outbound localhost loopback for the Ollama translation client
+        # (http://localhost:11434). We deliberately do NOT grant
+        # network.server — nothing in MirrorMesh listens on a socket.
+        # R3 (local-only inference) is enforced by *what we connect to*,
+        # not by the entitlement.
+        com.apple.security.network.client: true
         # com.apple.developer.system-extension.install added in M24 when the
         # virtual-camera target lands; that entitlement requires a real
         # development cert and won't build with ad-hoc signing.

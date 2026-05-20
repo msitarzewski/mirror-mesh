@@ -33,16 +33,51 @@ public final class Renderer: @unchecked Sendable {
         public var showFaceMesh: Bool
         public var meshStyle: MeshStyle
         public var meshColor: SIMD4<Float>
+        /// M53: render-level gate. The `AvatarMask` cartoon overlay is a Wireframe-only debug
+        /// affordance — Mirror and Mask styles must never composite it, regardless of the
+        /// `showAvatarMask` toggle. We carry the style here (rather than coupling the renderer
+        /// to `MirrorMeshCore.RenderStyle`) so this module stays a leaf on the dep graph.
+        public var isWireframeStyle: Bool
         public init(showLandmarks: Bool = true,
-                    showAvatarMask: Bool = true,
+                    showAvatarMask: Bool = false,
                     showFaceMesh: Bool = false,
                     meshStyle: MeshStyle = .wireframe,
-                    meshColor: SIMD4<Float> = SIMD4(0.0, 1.0, 0.4, 0.9)) {
+                    meshColor: SIMD4<Float> = SIMD4(0.0, 1.0, 0.4, 0.9),
+                    isWireframeStyle: Bool = true) {
             self.showLandmarks = showLandmarks
             self.showAvatarMask = showAvatarMask
             self.showFaceMesh = showFaceMesh
             self.meshStyle = meshStyle
             self.meshColor = meshColor
+            self.isWireframeStyle = isWireframeStyle
+        }
+    }
+
+    /// M56: per-frame reenactment payload handed to `render(...)`. Vertices/normals/indices are the
+    /// stylized 3D head's deformed mesh; `yaw/pitch/roll` are pose channels in radians; the
+    /// optional bounding box anchors the head to where the operator's face appears on screen.
+    public struct StylizedHeadPayload: Sendable {
+        public var vertices: [SIMD3<Float>]
+        public var normals: [SIMD3<Float>]
+        public var indices: [UInt16]
+        public var yaw: Float
+        public var pitch: Float
+        public var roll: Float
+        public var landmarkBoundingBoxNorm: CGRect?
+        public init(vertices: [SIMD3<Float>],
+                    normals: [SIMD3<Float>],
+                    indices: [UInt16],
+                    yaw: Float,
+                    pitch: Float,
+                    roll: Float,
+                    landmarkBoundingBoxNorm: CGRect?) {
+            self.vertices = vertices
+            self.normals = normals
+            self.indices = indices
+            self.yaw = yaw
+            self.pitch = pitch
+            self.roll = roll
+            self.landmarkBoundingBoxNorm = landmarkBoundingBoxNorm
         }
     }
 
@@ -56,6 +91,7 @@ public final class Renderer: @unchecked Sendable {
     private let landmarkOverlay: LandmarkOverlay
     private let avatarMask: AvatarMask
     public let meshRenderer: FaceMeshRenderer
+    public let stylizedHead: StylizedHeadRenderer
 
     public init(context: MetalContext,
                 outputSize: (width: Int, height: Int),
@@ -69,11 +105,13 @@ public final class Renderer: @unchecked Sendable {
         self.landmarkOverlay = try LandmarkOverlay(context: context)
         self.avatarMask = try AvatarMask(context: context)
         self.meshRenderer = try FaceMeshRenderer(context: context)
+        self.stylizedHead = try StylizedHeadRenderer(context: context)
     }
 
     public func render(captured: CapturedFrame,
                        landmarks: LandmarkFrame?,
-                       blendshapes: BlendshapeFrame?) -> RenderedFrame? {
+                       blendshapes: BlendshapeFrame?,
+                       stylizedHead payload: StylizedHeadPayload? = nil) -> RenderedFrame? {
         TelemetryBus.emit(.stageStart(stage: .render,
                                       frame: captured.frameID,
                                       hostTimeNs: MirrorMeshCore.hostTimeNs()))
@@ -133,8 +171,31 @@ public final class Renderer: @unchecked Sendable {
                                 viewportHeight: outputHeight)
         }
 
-        if options.showAvatarMask {
+        // M53: enforce Wireframe-only at the render boundary, not just via options plumbing.
+        // The cartoon AvatarMask is a debug affordance that previously leaked into Mirror/Mask
+        // when options weren't reapplied (e.g., before the first applySettings() tick).
+        if options.isWireframeStyle && options.showAvatarMask {
             avatarMask.encode(into: enc, blendshapes: blendshapes)
+        }
+
+        // M56: the stylized 3D head composites on top of all other layers. Empty payload is a
+        // no-op (no identity loaded). The renderer is the only layer that touches the stylized
+        // head's Metal pipeline — MirrorMeshReenact stays free of Metal imports.
+        if let payload = payload {
+            do {
+                try stylizedHead.encode(
+                    into: enc,
+                    vertices: payload.vertices,
+                    normals: payload.normals,
+                    indices: payload.indices,
+                    pose: StylizedHeadRenderer.Pose(yaw: payload.yaw, pitch: payload.pitch, roll: payload.roll),
+                    landmarkBoundingBox: payload.landmarkBoundingBoxNorm,
+                    viewportWidth: outputWidth,
+                    viewportHeight: outputHeight
+                )
+            } catch {
+                TelemetryBus.emit(.warning(stage: .render, message: "stylized head encode failed: \(error)"))
+            }
         }
 
         enc.endEncoding()

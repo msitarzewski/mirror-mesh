@@ -191,6 +191,22 @@ public enum ConsentedIdentityVerifier {
         }
     }
 
+    /// SHA-256 over the canonical bundle bytes — the same input used for the signature
+    /// (canonical header JSON with signature cleared, concatenated with PNG bytes). Used by
+    /// `SessionManifest.identity_sha256` to bind a session to the specific .mmid bundle that
+    /// authorized it. Returns lowercase hex.
+    public static func canonicalSHA256(identity: ConsentedIdentity, pngBytes: Data) -> String? {
+        var clearable = identity
+        clearable.signature_b64 = nil
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        enc.outputFormatting = [.sortedKeys]
+        guard let canonical = try? enc.encode(clearable) else { return nil }
+        var message = canonical
+        message.append(pngBytes)
+        return SHA256.hash(data: message).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Scope grammar in v1: a single token `vX.Y+` meaning "this version and later compatible".
     private static func checkScope(_ scope: String, runtimeVersion: String) throws {
         let trimmed = scope.trimmingCharacters(in: .whitespaces)

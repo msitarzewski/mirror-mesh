@@ -46,3 +46,8 @@ notarize-submit.log
 # Training logs (model training script produces these locally)
 /training.out
 /training.err
+
+# ConsentedIdentity bundles produced by mirrormesh-consent / smoke tests.
+# Never commit these — they bind a real subject's PNG + signed disclosure.
+/*.mmid
+

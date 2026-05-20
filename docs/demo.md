@@ -86,8 +86,8 @@ Per-session keys are ephemeral; the public key is published in the manifest.
 | Path | What it does |
 |------|--------------|
 | `Sources/MirrorMeshOutput/Pipeline.swift` | End-to-end orchestrator |
-| `Sources/mirrormesh-bench/main.swift` | Scenario runner |
-| `Sources/mirrormesh-verify/main.swift` | Manifest verifier |
+| `Sources/mirrormesh-bench/BenchCLI.swift` | Scenario runner (ADR-0013: `@main` struct, not `main.swift`) |
+| `Sources/mirrormesh-verify/VerifyCLI.swift` | Manifest verifier (ADR-0013: `@main` struct, not `main.swift`) |
 | `Sources/MirrorMeshWatermark/FrameSigner.swift` | Ed25519 signing |
 | `Sources/MirrorMeshWatermark/SessionManifest.swift` | Tamper-evident session manifest |
 | `Sources/MirrorMeshCore/Telemetry.swift` | Per-stage telemetry bus |

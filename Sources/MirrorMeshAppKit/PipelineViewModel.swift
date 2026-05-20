@@ -5,6 +5,8 @@ import MirrorMeshCapture
 import MirrorMeshRender
 import MirrorMeshWatermark
 import MirrorMeshOutput
+import MirrorMeshVoice
+import MirrorMeshTranslate
 
 /// User-facing pipeline errors surfaced to SwiftUI. Mirrors the `CaptureError` cases the UI cares
 /// about; we keep this enum local so the UI doesn't import the full capture stack just for types.
@@ -22,6 +24,15 @@ public enum PipelineError: Error, Equatable, Sendable {
 public final class PipelineViewModel: ObservableObject {
     @Published public var running: Bool = false
     @Published public var consent: ConsentRecord?
+    /// M58: the currently-loaded ConsentedIdentity, if any. `nil` means "no puppet loaded;
+    /// reenactment paths are gated off." Set only by `loadIdentity(from:)` after the
+    /// signature has been verified.
+    @Published public var consentedIdentity: ConsentedIdentity? = nil
+    /// PNG bytes of the loaded identity's source image. Held so the ReenactStage can pick
+    /// it up without a second disk read. Published so views can preview the loaded face.
+    @Published public var identityPngData: Data? = nil
+    /// User-facing error from the last identity-load attempt. Cleared on the next successful load.
+    @Published public var identityVerificationError: String? = nil
     @Published public var perStageLatencyMs: [StageID: StageLatency] = [:]
     @Published public var latestFramePreview: LatestFramePreview?
     /// Latest rendered frame from the pipeline. Drives `CameraPreviewView` Metal blits.
@@ -39,8 +50,37 @@ public final class PipelineViewModel: ObservableObject {
     /// False after the user has explicitly hit "Start Session" with consent.
     @Published public var isPreview: Bool = false
 
+    // MARK: - Voice / Translation (v0.7.0 / v0.8.0)
+
+    /// Latest transcript text surfaced by the voice stage. Updated on every partial result so
+    /// the UI can show a live caption; final results overwrite the partial. Empty string means
+    /// "nothing transcribed yet" (used by VoiceInspector to render a placeholder).
+    @Published public var currentTranscript: String = ""
+    /// True if the most recent transcript update was a finalized utterance (not a partial).
+    /// Used by VoiceInspector to render partials in muted color and finals in primary.
+    @Published public var currentTranscriptIsFinal: Bool = false
+    /// Latest translation string emitted by the translation stage. Mirrors `currentTranscript`
+    /// — the UI shows the most recent translated utterance.
+    @Published public var lastTranslation: String = ""
+    /// True while the voice stage is actively transcribing. Drives the green/orange/gray
+    /// status dot in VoiceInspector and the toolbar pill.
+    @Published public var voiceActive: Bool = false
+    /// True while the translation stage is actively translating. Drives the status dot in
+    /// TranslationInspector and the toolbar pill. ALSO coerces the disclosure chirp on per
+    /// R2/R12 (the AppSettings side of that lock is owned by the parallel agent; the UI
+    /// always shows the locked-on footer regardless).
+    @Published public var translationActive: Bool = false
+    /// User-facing error from the most recent voice-stage attempt. Nil when healthy.
+    @Published public var voiceError: String? = nil
+    /// User-facing error from the most recent translation-stage attempt. Nil when healthy.
+    @Published public var translationError: String? = nil
+
     public let ringBuffer: RingBufferSink
     public let settings: AppSettings
+
+    /// M59 — owns the AVAudioEngine for the start-of-session disclosure chirp. Lazy so we
+    /// don't init audio on import (some test harnesses run without an output device).
+    private lazy var chirp = DisclosureChirp()
 
     private var pipeline: Pipeline?
     private var pipelineTask: Task<Void, Never>?
@@ -79,16 +119,16 @@ public final class PipelineViewModel: ObservableObject {
         if !running { Task { await Telemetry.shared.attach(ringBuffer) } }
 
         let manifestURL = Self.defaultManifestURL()
+        // M53: seed the renderer with style-aware options so the very first frame respects the
+        // current render style (no AvatarMask leak before applySettings() ticks).
+        let initialOpts = rendererOptions(for: settings.renderStyle)
         let opts = PipelineOptions(
             mode: mode,
             captureWidth: 640,
             captureHeight: 360,
             fps: 30,
             maxFrames: nil,
-            rendererOptions: Renderer.Options(
-                showLandmarks: settings.showLandmarks,
-                showAvatarMask: settings.showAvatarMask
-            )
+            rendererOptions: initialOpts
         )
         let newPipeline = Pipeline(options: opts, manifestURL: manifestURL, jsonlURL: nil)
 
@@ -152,6 +192,43 @@ public final class PipelineViewModel: ObservableObject {
             pipelineTask = runTask
             startTicker()
         }
+
+        // M59 — disclosure chirp on session start. Suppressed for the synthetic preview
+        // (would fire every launch); fired exactly once per real session start (cold start
+        // or preview→live handoff). Locked-on in release per R2 and coerced-on whenever
+        // translation is active per R12; in dev the user can disable via AppSettings.chirpEnabled.
+        if !modeIsSynthetic && settings.chirpShouldBeAudible {
+            chirp.playChirp()
+        }
+    }
+
+    /// M58: read + verify a `.mmid` ConsentedIdentity bundle and publish the result. On
+    /// success the verified `ConsentedIdentity` + PNG bytes are exposed via `consentedIdentity`
+    /// and `identityPngData` for the ReenactStage (built by another agent) to pick up.
+    /// On failure the bundle is rejected and the user-facing reason lands in
+    /// `identityVerificationError`. The runtime version supplied to the verifier is the
+    /// `MirrorMeshCore.version` constant — same source of truth the manifest uses, so a
+    /// bundle whose scope satisfies the build also satisfies the running runtime.
+    public func loadIdentity(from url: URL) {
+        do {
+            let (identity, png) = try ConsentedIdentityBundle.read(from: url)
+            try ConsentedIdentityVerifier.verify(
+                identity: identity,
+                pngBytes: png,
+                runtimeVersion: MirrorMeshCore.version
+            )
+            self.consentedIdentity = identity
+            self.identityPngData = png
+            self.identityVerificationError = nil
+        } catch let e as ConsentedIdentityError {
+            self.consentedIdentity = nil
+            self.identityPngData = nil
+            self.identityVerificationError = e.description
+        } catch {
+            self.consentedIdentity = nil
+            self.identityPngData = nil
+            self.identityVerificationError = "Failed to read bundle: \(error)"
+        }
     }
 
     /// Push the SwiftUI settings panel's current toggle values into the live pipeline so the
@@ -169,6 +246,102 @@ public final class PipelineViewModel: ObservableObject {
         watermarkActive = watermarkVisible || settings.watermarkLockedInRelease
     }
 
+    // MARK: - Voice / Translation bridge (v0.7.0 / v0.8.0)
+
+    /// Enable / disable the voice stage on the live pipeline. Wires the transcript callback so
+    /// `currentTranscript` updates in real time. The pipeline-side API is being landed by a
+    /// parallel agent; if it errors (e.g. mic permission denied) we surface the message on
+    /// `voiceError` instead of throwing.
+    ///
+    /// Why @Sendable hop: the pipeline invokes the transcript callback from its own actor
+    /// executor; we hop to MainActor before touching `@Published` state.
+    public func setVoiceEnabled(_ on: Bool) async {
+        // Why capture: `pipeline` is actor-mutable; pin the reference before crossing isolation.
+        guard let p = pipeline else {
+            voiceActive = on
+            voiceError = on ? "Pipeline not running. Start a session first." : nil
+            return
+        }
+        do {
+            try await p.setVoiceEnabled(on)
+            if on {
+                let sink: @Sendable (Transcript) -> Void = { [weak self] t in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        self.currentTranscript = t.text
+                        self.currentTranscriptIsFinal = t.isFinal
+                    }
+                }
+                await p.setOnTranscript(sink)
+            } else {
+                await p.setOnTranscript(nil)
+                currentTranscript = ""
+                currentTranscriptIsFinal = false
+            }
+            voiceActive = on
+            voiceError = nil
+        } catch {
+            voiceActive = false
+            voiceError = "\(error)"
+        }
+    }
+
+    /// Enable / disable the translation stage. When enabled, the pipeline drives the stylized
+    /// head's mouth-region blendshapes from synthesized speech in the target locale. Requires
+    /// a verified `consentedIdentity` (translation drives a stylized-head pass — see R1 and
+    /// the `.stylizedNonHuman` scheme path).
+    ///
+    /// R2/R12: enabling translation locks the disclosure chirp on. The UI presents this as an
+    /// always-visible footer; the runtime lock is owned by AppSettings via the parallel agent.
+    public func setTranslationEnabled(_ on: Bool, options: TranslationStageOptions?) async {
+        guard let p = pipeline else {
+            translationActive = on
+            settings.setTranslationActive(on)
+            translationError = on ? "Pipeline not running. Start a session first." : nil
+            return
+        }
+        if on && consentedIdentity == nil {
+            translationError = "Translation requires a loaded ConsentedIdentity (.mmid bundle)."
+            translationActive = false
+            settings.setTranslationActive(false)
+            return
+        }
+        do {
+            try await p.setTranslationEnabled(on, options: options)
+            if on {
+                let sink: @Sendable (String) -> Void = { [weak self] translated in
+                    Task { @MainActor in
+                        self?.lastTranslation = translated
+                    }
+                }
+                await p.setOnTranslation(sink)
+            } else {
+                await p.setOnTranslation(nil)
+                lastTranslation = ""
+            }
+            translationActive = on
+            settings.setTranslationActive(on)
+            translationError = nil
+        } catch {
+            translationActive = false
+            settings.setTranslationActive(false)
+            translationError = "\(error)"
+        }
+    }
+
+    /// Build a `TranslationStageOptions` from the current `AppSettings`. Used by
+    /// `TranslationInspector` when the user flips the toggle on.
+    public func translationOptionsFromSettings() -> TranslationStageOptions {
+        var ollama = OllamaConfig()
+        ollama.model = settings.ollamaModel
+        return TranslationStageOptions(
+            enabled: true,
+            sourceLocale: Locale(identifier: settings.voiceLocale),
+            targetLocale: Locale(identifier: settings.translationTargetLocale),
+            ollama: ollama
+        )
+    }
+
     /// Map a `RenderStyle` to a `Renderer.Options` preset. Wireframe is the only style that
     /// honors the granular landmark/avatar overrides; Mirror and Mask are intentionally clean.
     private func rendererOptions(for style: RenderStyle) -> Renderer.Options {
@@ -179,13 +352,15 @@ public final class PipelineViewModel: ObservableObject {
                 showAvatarMask: settings.showAvatarMask,
                 showFaceMesh: true,
                 meshStyle: .wireframe,
-                meshColor: SIMD4(0.0, 1.0, 0.4, 0.9)
+                meshColor: SIMD4(0.0, 1.0, 0.4, 0.9),
+                isWireframeStyle: true
             )
         case .mirror:
             return Renderer.Options(
                 showLandmarks: false,
                 showAvatarMask: false,
-                showFaceMesh: false
+                showFaceMesh: false,
+                isWireframeStyle: false
             )
         case .mask:
             return Renderer.Options(
@@ -193,7 +368,8 @@ public final class PipelineViewModel: ObservableObject {
                 showAvatarMask: false,
                 showFaceMesh: true,
                 meshStyle: .filled,
-                meshColor: SIMD4(0.92, 0.74, 0.58, 0.95)  // warm skin-toned fill for the synthetic face
+                meshColor: SIMD4(0.92, 0.74, 0.58, 0.95),  // warm skin-toned fill for the synthetic face
+                isWireframeStyle: false
             )
         }
     }
@@ -379,6 +555,16 @@ public final class AppSettings: ObservableObject {
         public static let showAvatarMask  = "mirrormesh.showAvatarMask"
         public static let watermarkVisible = "mirrormesh.watermarkVisible"
         public static let renderStyle     = "mirrormesh.renderStyle"
+        /// M59 — persisted dev-build override. In release the toggle is locked on; the key
+        /// is read but always coerced to true via `chirpLockedInRelease` (same pattern as
+        /// `watermarkLockedInRelease`).
+        public static let chirpEnabled    = "mirrormesh.chirpEnabled"
+        // v0.7.0 / v0.8.0 — voice + translation persistence.
+        public static let voiceEnabled    = "mirrormesh.voiceEnabled"
+        public static let voiceLocale     = "mirrormesh.voiceLocale"
+        public static let translationEnabled       = "mirrormesh.translationEnabled"
+        public static let translationTargetLocale  = "mirrormesh.translationTargetLocale"
+        public static let ollamaModel    = "mirrormesh.ollamaModel"
     }
 
     /// Default suite name. Tests pass their own to stay isolated.
@@ -388,9 +574,35 @@ public final class AppSettings: ObservableObject {
     @Published public var showAvatarMask: Bool { didSet { defaults.set(showAvatarMask, forKey: Keys.showAvatarMask) } }
     @Published public var watermarkVisible: Bool { didSet { defaults.set(watermarkVisible, forKey: Keys.watermarkVisible) } }
     @Published public var renderStyle: RenderStyle { didSet { defaults.set(renderStyle.rawValue, forKey: Keys.renderStyle) } }
+    /// M59 — audible disclosure chirp. Default true; locked-on in release builds (R2/R12).
+    /// Mutating this in release is a no-op against `effectiveChirpEnabled`, but we still
+    /// persist the user's preference so flipping back to a dev build remembers it.
+    @Published public var chirpEnabled: Bool { didSet { defaults.set(chirpEnabled, forKey: Keys.chirpEnabled) } }
+
+    // v0.7.0 — voice (Apple Speech). Default off; user opts in. Locale is a BCP-47 string so
+    // we round-trip through UserDefaults without an explicit codec.
+    @Published public var voiceEnabled: Bool { didSet { defaults.set(voiceEnabled, forKey: Keys.voiceEnabled) } }
+    @Published public var voiceLocale: String { didSet { defaults.set(voiceLocale, forKey: Keys.voiceLocale) } }
+
+    // v0.8.0 — translation (local Ollama + AVSpeech). Default off; enabling locks the
+    // disclosure chirp on per R2/R12 (orchestrator wires `effectiveChirpEnabled` to
+    // honor `translationActive`).
+    @Published public var translationEnabled: Bool { didSet { defaults.set(translationEnabled, forKey: Keys.translationEnabled) } }
+    @Published public var translationTargetLocale: String { didSet { defaults.set(translationTargetLocale, forKey: Keys.translationTargetLocale) } }
+    @Published public var ollamaModel: String { didSet { defaults.set(ollamaModel, forKey: Keys.ollamaModel) } }
 
     /// Release builds never let users hide the watermark. We surface that as a locked toggle.
     public let watermarkLockedInRelease: Bool
+    /// Same locking semantics as `watermarkLockedInRelease` — true in release, false in DEBUG.
+    /// Used by both the UI (to disable the toggle) and by `effectiveChirpEnabled` (to coerce
+    /// the runtime value to true regardless of the persisted preference).
+    public let chirpLockedInRelease: Bool
+
+    /// The actual runtime value: chirpEnabled OR locked-in-release. The audio path should
+    /// read this, never `chirpEnabled` directly.
+    public var effectiveChirpEnabled: Bool {
+        chirpLockedInRelease ? true : chirpEnabled
+    }
 
     private let defaults: UserDefaults
 
@@ -398,6 +610,12 @@ public final class AppSettings: ObservableObject {
                 showAvatarMask: Bool = true,
                 watermarkVisible: Bool = true,
                 renderStyle: RenderStyle = .wireframe,
+                chirpEnabled: Bool = true,
+                voiceEnabled: Bool = false,
+                voiceLocale: String = "en-US",
+                translationEnabled: Bool = false,
+                translationTargetLocale: String = "es-ES",
+                ollamaModel: String = "llama3.2:3b",
                 suiteName: String? = "ai.mirrormesh") {
         // Why: a named suite avoids polluting the host process's standard defaults and lets
         // tests inject a unique suite for isolation. Falls back to standard if the suite fails.
@@ -407,6 +625,14 @@ public final class AppSettings: ObservableObject {
         self.showLandmarks    = (store.object(forKey: Keys.showLandmarks)    as? Bool) ?? showLandmarks
         self.showAvatarMask   = (store.object(forKey: Keys.showAvatarMask)   as? Bool) ?? showAvatarMask
         self.watermarkVisible = (store.object(forKey: Keys.watermarkVisible) as? Bool) ?? watermarkVisible
+        self.chirpEnabled     = (store.object(forKey: Keys.chirpEnabled)     as? Bool) ?? chirpEnabled
+        // v0.7.0 / v0.8.0 — voice + translation persistence. Strings via `string(forKey:)`
+        // because UserDefaults distinguishes "missing" from "" via the nil return.
+        self.voiceEnabled            = (store.object(forKey: Keys.voiceEnabled)        as? Bool) ?? voiceEnabled
+        self.voiceLocale             = store.string(forKey: Keys.voiceLocale)              ?? voiceLocale
+        self.translationEnabled      = (store.object(forKey: Keys.translationEnabled)  as? Bool) ?? translationEnabled
+        self.translationTargetLocale = store.string(forKey: Keys.translationTargetLocale)  ?? translationTargetLocale
+        self.ollamaModel             = store.string(forKey: Keys.ollamaModel)              ?? ollamaModel
         if let raw = store.string(forKey: Keys.renderStyle), let style = RenderStyle(rawValue: raw) {
             self.renderStyle = style
         } else {
@@ -414,8 +640,10 @@ public final class AppSettings: ObservableObject {
         }
         #if DEBUG
         self.watermarkLockedInRelease = false
+        self.chirpLockedInRelease     = false
         #else
         self.watermarkLockedInRelease = true
+        self.chirpLockedInRelease     = true
         #endif
     }
 }

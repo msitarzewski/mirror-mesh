@@ -1,0 +1,41 @@
+// Local.xcconfig.template — copy to Local.xcconfig (gitignored) and fill in.
+//
+// This is the canonical template for the values an outside builder needs to
+// produce a signed + notarized MirrorMesh.app. None of these values are
+// secrets in themselves (the Team ID is a public-ish 10-char identifier);
+// Local.xcconfig is gitignored so per-developer values don't conflict in PRs
+// and so a fork without an Apple Developer account isn't forced to invent
+// one.
+//
+// Workflow:
+//   1) cp Local.xcconfig.template Local.xcconfig
+//   2) Paste your Team ID below
+//   3) Create an App Store Connect API key + store it in your keychain (see
+//      scripts/release/README.md)
+//   4) scripts/release/archive.sh   # builds + signs + zips
+//   5) scripts/release/notarize.sh  # submits + staples
+//
+// Hardened Runtime is enabled in MirrorMesh.xcconfig. Sandboxing entitlements
+// live in MirrorMesh/MirrorMesh.entitlements.
+
+// Apple Developer Team ID (10-char alphanumeric).
+// Xcode → Settings → Accounts → your Apple ID → highlight team → look at the
+// "Team ID" column in the lower table.
+DEVELOPMENT_TEAM =
+
+// For Developer ID distribution (outside the App Store, what we ship):
+//   CODE_SIGN_IDENTITY = Developer ID Application
+//   CODE_SIGN_STYLE    = Manual
+// For local development against Xcode automatic signing, override to:
+//   CODE_SIGN_IDENTITY = Apple Development
+//   CODE_SIGN_STYLE    = Automatic
+CODE_SIGN_IDENTITY = Developer ID Application
+CODE_SIGN_STYLE = Manual
+
+// Provisioning Profile Specifier (optional; Developer ID apps generally
+// don't need one — leave blank unless your team config requires it).
+PROVISIONING_PROFILE_SPECIFIER =
+
+// Bundle ID — defaults to ai.mirrormesh.MirrorMesh in MirrorMesh.xcconfig.
+// Override here if you need a different one (e.g. for a fork):
+// PRODUCT_BUNDLE_IDENTIFIER = com.yourdomain.MirrorMesh

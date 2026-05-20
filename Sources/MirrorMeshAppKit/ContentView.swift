@@ -160,6 +160,13 @@ public struct ContentView: View {
                 sessionStatusPill
             }
         }
+        ToolbarItem(placement: .navigation) {
+            // v0.7.0 / v0.8.0 — voice + translation activity chips. Only render when active so
+            // the toolbar stays uncluttered during the common case.
+            if viewModel.voiceActive || viewModel.translationActive {
+                voiceTranslationPills
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             sessionButton
         }
@@ -171,6 +178,39 @@ public struct ContentView: View {
             }
             .help("Show or hide the settings panel")
         }
+    }
+
+    /// Composite chip row. SF Symbols (no emoji) per the project's existing style.
+    @ViewBuilder
+    private var voiceTranslationPills: some View {
+        HStack(spacing: 6) {
+            if viewModel.voiceActive {
+                Label("Listening", systemImage: "mic.fill")
+                    .font(.caption.weight(.medium))
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.regularMaterial, in: Capsule())
+                    .help("On-device speech transcription is active.")
+            }
+            if viewModel.translationActive {
+                Label(translationPillLabel, systemImage: "globe")
+                    .font(.caption.weight(.medium))
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.regularMaterial, in: Capsule())
+                    .help("Translating to \(viewModel.settings.translationTargetLocale) via local Ollama. Disclosure chirp is locked on.")
+            }
+        }
+    }
+
+    /// Short uppercase language tag for the translation chip — e.g. "ES" / "JA" / "ZH".
+    private var translationPillLabel: String {
+        let code = viewModel.settings.translationTargetLocale
+        // Take the language subtag (before "-") and uppercase. "es-ES" → "ES".
+        let lang = code.split(separator: "-").first.map(String.init) ?? code
+        return lang.uppercased()
     }
 
     private var sessionButton: some View {
@@ -258,6 +298,12 @@ private struct SettingsInspector: View {
                 Text("Style")
             }
 
+            IdentityInspector(viewModel: viewModel)
+
+            VoiceInspector(viewModel: viewModel, settings: settings)
+
+            TranslationInspector(viewModel: viewModel, settings: settings)
+
             Section {
                 Toggle("Show landmarks overlay", isOn: $settings.showLandmarks)
                     .disabled(settings.renderStyle != .wireframe)
@@ -281,10 +327,19 @@ private struct SettingsInspector: View {
                             .help("Watermark is required in release builds and cannot be disabled.")
                     }
                 }
+                HStack(spacing: 6) {
+                    Toggle("Disclosure chirp on session start", isOn: chirpBinding)
+                        .disabled(settings.chirpLockedInRelease)
+                    if settings.chirpLockedInRelease {
+                        Image(systemName: "lock.fill")
+                            .foregroundStyle(.secondary)
+                            .help("Audible disclosure is required in release builds and cannot be disabled.")
+                    }
+                }
             } header: {
                 Text("Trust")
             } footer: {
-                Text("Watermarking policy is enforced by the renderer. The toggle affects whether the visible badge is composited; cryptographic signing of every output frame is always on.")
+                Text("Watermarking policy is enforced by the renderer. The toggle affects whether the visible badge is composited; cryptographic signing of every output frame is always on. The disclosure chirp plays once per session start; it is locked on in release builds.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -305,6 +360,16 @@ private struct SettingsInspector: View {
             get: { settings.watermarkLockedInRelease ? true : settings.watermarkVisible },
             set: { newValue in
                 if !settings.watermarkLockedInRelease { settings.watermarkVisible = newValue }
+            }
+        )
+    }
+
+    // M59: matches `watermarkBinding`. Release builds pin to true regardless of UI state.
+    private var chirpBinding: Binding<Bool> {
+        Binding(
+            get: { settings.chirpLockedInRelease ? true : settings.chirpEnabled },
+            set: { newValue in
+                if !settings.chirpLockedInRelease { settings.chirpEnabled = newValue }
             }
         )
     }

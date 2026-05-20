@@ -34,14 +34,14 @@ Same impressive demo to an outsider. Architecturally distinct.
 
 | # | Title | Status |
 |---|-------|--------|
-| **M43** | Camera-as-PIP in Mirror/Mask styles | 🟡 in flight |
-| **M52** | App icon refresh — mesh motif | ⚪ |
-| **M53** | Mask polish — hide AvatarMask in non-Wireframe styles + better shading | ⚪ |
-| **M55** | `ConsentedIdentity` protocol + `.mmid` bundle format | 🟡 in flight |
-| **M56** | FOMM CoreML port (Apache-2.0 base) | ⚪ |
-| **M57** | `mirrormesh-consent` CLI | ⚪ blocked on M55 |
-| **M58** | Identity-load UX in app | ⚪ blocked on M55, M56 |
-| **M59** | Audible disclosure chirp | ⚪ |
+| **M43** | Camera-as-PIP in Mirror/Mask styles | ✅ |
+| **M52** | App icon refresh — mesh motif | ✅ |
+| **M53** | Mask polish — hide AvatarMask in non-Wireframe styles + better shading | ✅ |
+| **M55** | `ConsentedIdentity` protocol + `.mmid` bundle format | ✅ |
+| **M56** | Stylized 3D head reenactor (license-clean, ethics-aligned path) + FOMM photoreal scaffolding (manual weight-download step documented) | ✅ |
+| **M57** | `mirrormesh-consent` CLI | ✅ |
+| **M58** | Identity-load UX in app | ✅ |
+| **M59** | Audible disclosure chirp | ✅ |
 
 ## Exit criteria
 

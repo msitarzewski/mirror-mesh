@@ -25,7 +25,7 @@ Default shipped builds carry visible badge + cryptographic frame signing + sessi
 
 ## R3 — Local-Only on the Inference Hot Path
 
-No code on the per-frame inference path may make a network call. Streaming output (WebRTC) is allowed; inference fallback to cloud is not.
+No code on the per-frame inference path may make an **off-device** network call. Streaming output (WebRTC) is allowed; inference fallback to cloud is not. Localhost-only services (e.g. a user-installed Ollama instance at `http://localhost:11434`) are permitted because the inference still terminates inside the user's own machine; document any such dependency at install time and surface a clear error when the local service is unreachable.
 
 ## R4 — No Cloud LLM / ML APIs as Inference Backends
 

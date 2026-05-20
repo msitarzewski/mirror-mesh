@@ -1,0 +1,45 @@
+The following files vendored under models/external/fomm/ are derived from the
+First Order Motion Model for Image Animation by Aliaksandr Siarohin et al.
+
+Upstream:        https://github.com/AliaksandrSiarohin/first-order-model
+Upstream commit: c0274845cb2dd8f0f2fe6da580d97b60fef90c91 (fetched 2026-05-19)
+
+Vendored files:
+  models/external/fomm/keypoint_detector.py  (from modules/keypoint_detector.py)
+  models/external/fomm/dense_motion.py       (from modules/dense_motion.py)
+  models/external/fomm/generator.py          (from modules/generator.py)
+  models/external/fomm/util.py               (from modules/util.py)
+
+Modifications:
+  - Headers added to each vendored file noting origin, commit, license.
+  - util.py: SynchronizedBatchNorm2d (multi-GPU training primitive from the
+    sync_batchnorm extension) replaced with torch.nn.BatchNorm2d. Numerically
+    identical at batch_size=1 inference, and the form coremltools converts.
+    No other architectural changes.
+
+Per the MIT license terms below, the upstream copyright notice and the full
+license text are reproduced verbatim:
+
+================================================================================
+MIT License
+
+Copyright (c) 2019-2023 Aliaksandr Siarohin
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+================================================================================
