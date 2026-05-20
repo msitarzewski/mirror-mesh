@@ -97,6 +97,9 @@ public actor Pipeline {
     // Why: SwiftUI preview needs the latest RenderedFrame after each render; the callback fires
     // post-render and pre-watermark accounting so a Metal preview sees pixels with minimum delay.
     private var onRender: (@Sendable (RenderedFrame) -> Void)?
+    /// Why: M43 PIP — the SwiftUI camera-as-PIP overlay needs the raw `CapturedFrame` before
+    /// rendering applies any synthetic styling, so the operator can verify themselves.
+    private var onCapture: (@Sendable (CapturedFrame) -> Void)?
     private var renderer: Renderer?
     private var watermarker: Watermarker?
 
@@ -112,6 +115,13 @@ public actor Pipeline {
     /// Note: invoked from the pipeline actor; downstream code must hop to its own isolation.
     public func setOnRender(_ cb: (@Sendable (RenderedFrame) -> Void)?) {
         self.onRender = cb
+    }
+
+    /// Install a callback invoked for every captured frame *before* render. Used by the
+    /// camera-as-PIP overlay so the operator's real face is verifiable when the hero view is
+    /// a synthetic transformation.
+    public func setOnCapture(_ cb: (@Sendable (CapturedFrame) -> Void)?) {
+        self.onCapture = cb
     }
 
     /// Update the renderer's overlay toggles live (driven by the SwiftUI Settings panel).
@@ -256,6 +266,11 @@ public actor Pipeline {
         outer: for await captured in stream {
             if stopped { break }
             if let cap = options.maxFrames, framesProcessed >= cap { break outer }
+
+            // M43: hand the raw CapturedFrame to the PIP consumer (if attached) before any
+            // synthetic styling. Lets the UI render the operator's actual face alongside the
+            // transformed hero view.
+            onCapture?(captured)
 
             let e2eStart = MirrorMeshCore.hostTimeNs()
             // End-to-end signpost: one umbrella interval per frame in Instruments, containing

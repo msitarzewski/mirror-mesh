@@ -26,6 +26,10 @@ public final class PipelineViewModel: ObservableObject {
     @Published public var latestFramePreview: LatestFramePreview?
     /// Latest rendered frame from the pipeline. Drives `CameraPreviewView` Metal blits.
     @Published public var latestFrame: RenderedFrame?
+    /// Latest *raw* captured frame, pre-render. Drives the camera-as-PIP overlay (M43) when
+    /// the style is Mirror or Mask — i.e., when the hero view is synthetic and the operator
+    /// is verifiable as the small corner overlay.
+    @Published public var latestCapturedFrame: CapturedFrame?
     /// Surface for UI-actionable errors (e.g., camera permission denied).
     @Published public var error: PipelineError?
 
@@ -123,8 +127,16 @@ public final class PipelineViewModel: ObservableObject {
             }
         }
 
+        // M43: parallel sink for raw captured frames feeding the PIP overlay.
+        let captureSink: @Sendable (CapturedFrame) -> Void = { [weak self] frame in
+            Task { @MainActor in
+                self?.latestCapturedFrame = frame
+            }
+        }
+
         let runTask: Task<Void, Never> = Task { [weak self] in
             await newPipeline.setOnRender(sink)
+            await newPipeline.setOnCapture(captureSink)
             do {
                 _ = try await newPipeline.run()
             } catch {

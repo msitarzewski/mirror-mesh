@@ -73,6 +73,19 @@ public struct ContentView: View {
     private var previewCard: some View {
         ZStack(alignment: .topTrailing) {
             CameraPreviewView(viewModel: viewModel)
+            // M43: operator-cam PIP for Mirror/Mask styles — small overlay in the bottom-left
+            // so the synthetic hero view (top-right watermark + center frame) stays clean.
+            if showsOperatorPIP {
+                VStack {
+                    Spacer()
+                    HStack {
+                        OperatorPIPView(viewModel: viewModel)
+                            .frame(width: 140, height: 105)
+                            .padding(12)
+                        Spacer()
+                    }
+                }
+            }
             watermarkHeroBadge
                 .padding(12)
         }
@@ -82,6 +95,14 @@ public struct ContentView: View {
                 .strokeBorder(.white.opacity(0.08), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// PIP shows when the hero view is synthetic so the operator can be verified.
+    private var showsOperatorPIP: Bool {
+        switch viewModel.settings.renderStyle {
+        case .wireframe: return false
+        case .mirror, .mask: return true
+        }
     }
 
     /// Hero card for the watermarking thesis. Green when active, dim when idle. The whole project
