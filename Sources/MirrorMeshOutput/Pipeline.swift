@@ -794,8 +794,9 @@ public actor Pipeline {
                let pstage = self.photorealStage {
                 let active = await pstage.hasIdentity
                 if active {
-                    if let photorealBuf = await pstage.apply(captured),
-                       let bbox = landmarks?.faceBoundingBoxNorm {
+                    let photorealBuf = await pstage.apply(captured)
+                    let bbox = landmarks?.faceBoundingBoxNorm
+                    if let photorealBuf = photorealBuf, let bbox = bbox {
                         photorealCompositeInput = Renderer.PhotorealComposite(
                             pixelBuffer: photorealBuf,
                             bboxNorm: bbox
@@ -803,6 +804,16 @@ public actor Pipeline {
                         // Photoreal composite occupies the face region — drop the stylized head
                         // overlay for this frame so we don't composite a second face on top.
                         renderStylizedPayload = nil
+                    } else if framesProcessed % 60 == 0 {
+                        // Every ~2s, surface why the composite was skipped so the operator can
+                        // diagnose "Photoreal: ON but I don't see any substitution".
+                        let reason = photorealBuf == nil
+                            ? "stage.apply returned nil (no source prepared or inference failed)"
+                            : "landmarks.faceBoundingBoxNorm nil (Vision found no face this frame)"
+                        FileHandle.standardError.write(
+                            "[mirrormesh] photoreal composite SKIPPED: \(reason)\n"
+                                .data(using: .utf8) ?? Data()
+                        )
                     }
                     // hasIdentity is sticky-true once flipped, so any tick where the stage is
                     // present means the manifest should carry photoreal_active.

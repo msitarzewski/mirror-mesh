@@ -1,10 +1,31 @@
 # MirrorMesh — Active Context
 
-**Updated**: 2026-05-20 (v1.1 photoreal follow-ups landed — capture-as-identity, transform_keypoint, FOMM parity, refresh.sh)
-**Current state machine position**: `IDLE` (M88/M89 shipped; M90/M91/M92/M93 shipped via parallel agents A + B + scripts/docs cleanup)
-**Substate**: `IDLE`
+**Updated**: 2026-05-20 (project paused — photoreal not visually working end-to-end)
+**Current state machine position**: `PAUSED`
+**Substate**: `IDLE` — maintainer set the project down. Resume when curiosity returns.
 
-**Photoreal status**: Inspector row, toolbar pill, and reactive style subtitles live. Auto-enabled on session start when the four LivePortrait mlpackages are present at `<repo>/models/`, `~/Library/Application Support/MirrorMesh/models/`, or the app bundle. v1.1 follow-ups: capture-as-identity one-click flow (mints real-face .mmid from live frame), transform_keypoint composition for expressive driving, FOMM photoreal inference parity. See `docs/PHOTOREAL_QUICKSTART.md`. Dev cache-miss helper at `scripts/dev/refresh.sh`.
+**Photoreal status — honest**: All the *infrastructure* is wired (mlpackage detection, identity gate, PhotorealStage, composite-at-bbox renderer, capture-as-identity, test persona, M37 handoff fix). Tests are green. The pipeline DOES call into the LivePortrait inference graph. But the rendered visual output is broken — final user screenshot showed a peach-colored blob with horizontal banding artifacts where the photoreal face should have been. Two known failure modes:
+
+1. **Self-as-source degeneracy**: the operator's captured face → driven by the operator's own face = output looks like passthrough. Visually indistinguishable from "nothing happened." Was misread as a positive several times across this session.
+2. **Test persona produces garbage**: the procedural cartoony face (`TestPersona.swift`) doesn't have the structure LivePortrait's `MotionExtractor` was trained to find keypoints on, so the warp+generator output is incoherent — peach blob + banding.
+
+What probably needs investigation when resuming (none done yet, all hypothesis):
+- Run `PhotorealBackend.reenact` standalone with a known-good 256×256 face PNG (e.g., a celebrity headshot from LivePortrait's own demo set) and compare against upstream's Python reference output on the same input. If the Swift output is also garbage, the inference graph has a math bug. If the Swift output matches reference, the bug is downstream in the composite or somewhere else in the Swift glue.
+- The `transform_keypoint` Swift port (`PhotorealBackend.transformKeypoint`) has unit tests for determinism and shape, but no value-equivalence test against a Python reference. Worth adding.
+- Verify color space: the PNG → MLMultiArray → inference → MLMultiArray → CVPixelBuffer chain crosses sRGB/linear conventions. A mishandled gamma at any step would produce washed-out / incorrect-luminance output. The banding artifact in the final screenshot is consistent with channel-order or precision corruption.
+- `PixelBufferConversion` writes `rgba[p+3] = 255` (alpha opaque) — confirmed. Not the bug.
+
+What IS working and ships as v1.0:
+- Trust layer (consent bundles, watermark, chirp, manifest, R12 refusals enforced)
+- Stylized 3D head reenactment in Wireframe (parametric, license-clean)
+- Apple on-device Speech (transcription works)
+- Translation pipeline (Ollama + TTS + lip-sync driver — CLI works, app integration wired)
+- Capture-as-identity mint flow (Vision face crop + signed .mmid persistence works)
+- Notarization scaffolding (waits on user-paste Team ID)
+- Paper draft v1 (7.5k words, real benches)
+- 209 tests / 40 suites green
+
+Lesson recorded: for ML model integration work, run the inference standalone against a known-good reference input and compare against the upstream Python output BEFORE wiring it into the UI. Optimistic interpretation of UI screenshots wasted real time today.
 
 ---
 

@@ -34,6 +34,31 @@ IS the source of their own face). The bundle is written to
 `~/Library/Application Support/MirrorMesh/default.mmid` so subsequent launches
 re-use it. The watermark, visible badge, and audible chirp are unchanged (R12).
 
+### Verifying that photoreal is actually replacing your face
+
+Click **Use Test Persona** in the Identity inspector. This loads a
+clearly-distinctive generated face (cartoony, vivid skin and hair colors)
+as your identity. Switch to Mirror style. The rendered face should be
+the generated persona, driven by your live expression.
+
+Without a test persona, self-capture-as-source produces a degenerate
+visual test: the photoreal output is your face driven by your face, which
+looks like you. The test persona is OBVIOUSLY not you, so any visual
+similarity to your face proves either (a) the substitution is being
+skipped or (b) something is wrong with the composite. With the persona
+loaded, Mirror should clearly show the cartoony face moving where yours is.
+
+The persona is procedurally drawn at runtime (no third-party image is
+bundled in the repo): a 256×256 teal-skinned, magenta-haired face with
+landmark geometry — eyes at ~40 % from top, mouth at ~75 % — that
+LivePortrait's motion extractor can still find sensible keypoints on.
+The bundle is persisted to
+`~/Library/Application Support/MirrorMesh/test-persona.mmid`, deliberately
+separate from `default.mmid` so loading the persona does not destroy your
+self-capture. R1 holds: this is `selfAsSource` — the operator consents to
+use an algorithmically-drawn face as their avatar; no real third party
+is involved.
+
 ## One-time setup
 
 1. **Convert LivePortrait weights to Core ML** (~3-5 min). Full details in

@@ -14,6 +14,7 @@
 **License**: **AGPL-3.0-only research project** (ADR-0015 supersedes ADR-0014). Copyright "Michael Sitarzewski".
 **Hardware**: User on M5 Max / 128 GB / 40 GPU cores — ML model selection unconstrained.
 **Open inputs from user**: `DEVELOPMENT_TEAM`, App Store Connect API key, GitHub `<user>/<repo>` URL.
+**Project status (2026-05-20)**: PAUSED. v1.0 infrastructure is shippable; photoreal LivePortrait substitution is wired but produces broken visual output (peach blob + banding). Maintainer set it down — resume when curiosity returns. See `activeContext.md` for the technical state + investigation hypotheses for whoever picks it back up.
 
 ## Done
 

@@ -2,16 +2,26 @@
 
 > **One-screen state-of-the-project. Read this first after a /compact or fresh session.**
 
-## Status as of 2026-05-20
+## Status as of 2026-05-20 — PAUSED
 
-**Working app**: live camera → real Vision landmarks → geometric or CoreML solver → **stylized 3D head reenactment gated on `ConsentedIdentity`** → **optional photoreal substitution via LivePortrait CoreML graph (M88/M89)** when the four mlpackages are present → optional **voice (Apple on-device Speech)** + **translation (Ollama) + TTS (AVSpeechSynthesizer) + audio-driven lip-sync overlay** on mouth region → Metal rendering (Wireframe / Mirror / Mask styles + stylized head composite, photoreal frame substitution active in Mirror/Mask) → Ed25519 watermark + visible badge + audible disclosure chirp + signed manifest carrying `identity_sha256` + `voice_transformed` + `audible_chirp` flags → SwiftUI window with operator PIP, Identity Inspector (photoreal status row), Voice Inspector, Translation Inspector, toolbar activity pills (Listening / translation / **Photoreal**).
+Maintainer set the project down after a long photoreal-debugging session that didn't visually land. Everything ELSE works and ships as v1.0; photoreal needs a fresh empirical pass when curiosity returns. See `memory-bank/activeContext.md` for the technical state + investigation hypotheses for whoever picks it up.
 
-Measured P50 latency on M5 Max:
-- Demo / synthetic / 640×360 / geometric solver: e2e 1.46 ms (vision 0.02, solver 0.06, render 0.69, watermark 0.58)
-- File / 1280×720 / real Apple Vision: e2e 4.24 ms (vision 2.23, render 0.65, watermark 1.36)
+**Working app**: live camera → real Vision landmarks → geometric or CoreML solver → **stylized 3D head reenactment gated on `ConsentedIdentity`** → optional **voice (Apple on-device Speech)** + **translation (Ollama) + TTS (AVSpeechSynthesizer) + audio-driven lip-sync overlay** on mouth region → Metal rendering (Wireframe / Mirror / Mask + stylized head composite) → Ed25519 watermark + visible badge + audible disclosure chirp + signed manifest → SwiftUI window with operator PIP, Identity Inspector (Capture-as-identity + Use Test Persona buttons), Voice Inspector, Translation Inspector, toolbar activity pills.
+
+**Photoreal substitution is wired but does NOT produce correct visual output.** All infrastructure is in place (detection, identity gate, PhotorealStage, composite-at-bbox renderer, capture-as-identity, test persona, M37 handoff fix); 209 tests green. The pipeline DOES call the LivePortrait inference graph. But the rendered face is incoherent — peach blob + horizontal banding with the procedural test persona; self-as-source produces output indistinguishable from raw camera passthrough.
+
+Hypotheses for fix (NONE TESTED — leave for resumer):
+- **Color-space mismatch** in the CVPixelBuffer↔MLMultiArray chain. Banding artifacts are consistent with channel-order or gamma corruption.
+- **`transform_keypoint` math** has subtle bug vs upstream Python reference. Unit tests cover determinism + shape but no value-equivalence against Python.
+- **LivePortrait keypoint detector** wasn't trained on cartoon faces — explains test-persona garbage but not self-as-source degeneracy.
+- **Recommended next move**: run `PhotorealBackend.reenact` standalone with a known-good 256×256 face PNG from LivePortrait's own demo set and `diff` Swift output against upstream Python on the same input. If Swift output matches reference, bug is downstream in composite. If garbage, bug is in inference graph.
+
+Measured P50 latency on M5 Max (still valid):
+- Demo / synthetic / 640×360 / geometric solver: e2e 1.46 ms
+- File / 1280×720 / real Apple Vision: e2e 4.24 ms
 - CoreML solver disagreement vs geometric: mean |Δcoef| 0.054, max 0.62 (eyeBlinkLeft)
 
-**176 tests / 34 suites green** under `swift test`. `swift build` clean across all 17 modules + 10 CLIs. Hardware: M5 Max / 128 GB / 40 GPU cores.
+**209 tests / 40 suites green** under `swift test`. `swift build` clean. Hardware: M5 Max / 128 GB / 40 GPU cores.
 
 **License**: AGPL-3.0-only research project (ADR-0015 supersedes ADR-0014). Copyright "Michael Sitarzewski". DCO sign-off on commits. See `NOTICE.md`.
 

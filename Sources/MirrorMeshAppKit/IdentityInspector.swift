@@ -34,6 +34,11 @@ public struct IdentityInspector: View {
     /// disables the button so the user can't double-fire.
     @State private var capturing: Bool = false
 
+    /// True while a test-persona mint is in flight. Same role as `capturing` but for
+    /// the procedural-persona path — kept separate so the two buttons can't show a
+    /// spurious spinner on each other.
+    @State private var loadingPersona: Bool = false
+
     public init(viewModel: PipelineViewModel) {
         self.viewModel = viewModel
     }
@@ -50,6 +55,7 @@ public struct IdentityInspector: View {
             }
             .controlSize(.small)
             captureAsIdentityButton
+            useTestPersonaButton
         } header: {
             Text("Identity")
         } footer: {
@@ -90,6 +96,67 @@ public struct IdentityInspector: View {
         .controlSize(.small)
         .disabled(capturing || viewModel.latestCapturedFrame == nil)
         .help("Replaces the loaded identity with a 256×256 face crop from the live camera. Requires Mirror or live capture session running.")
+    }
+
+    /// Loads a procedurally-generated, obviously-not-the-operator face (teal skin,
+    /// magenta hair) as a `self-as-source` `.mmid` and hot-swaps it into the running
+    /// pipeline. Designed for verifying that the photoreal substitution is actually
+    /// replacing the operator's face — capture-as-identity is a degenerate visual
+    /// test (you see "yourself" because the source IS you), while the test persona
+    /// makes substitution obvious: the rendered face is clearly cartoony.
+    ///
+    /// R1 compliance: `selfAsSource` is correct here — the operator is consenting to
+    /// use an algorithmically-drawn face as their avatar; no real third party.
+    /// R12: watermark, badge, and chirp are unchanged; same trust surfaces apply.
+    @ViewBuilder
+    private var useTestPersonaButton: some View {
+        Button {
+            triggerTestPersona()
+        } label: {
+            HStack(spacing: 6) {
+                if loadingPersona {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Loading…")
+                } else {
+                    Image(systemName: "theatermasks")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Use Test Persona")
+                        Text("Loads a clearly-distinctive generated face so you can verify photoreal is replacing your face (not just rendering yourself).")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .controlSize(.small)
+        .disabled(loadingPersona)
+        .help("Loads a generated cartoony face as your identity. The rendered face will obviously not be you — so if photoreal is on you can SEE the substitution.")
+    }
+
+    /// Spawn the test-persona mint on a detached Task to avoid blocking the SwiftUI
+    /// run loop. Same MainActor hop-back pattern as `triggerSelfCapture`. On success
+    /// we publish the verified identity + PNG and ask the view-model to hot-swap the
+    /// running pipeline (which cycles the photoreal stage so the appearance cache
+    /// rebuilds against the new source — same flow as the self-capture button).
+    private func triggerTestPersona() {
+        loadingPersona = true
+        Task { @MainActor in
+            defer { loadingPersona = false }
+            do {
+                let (identity, png) = try await TestPersona.mintAndPersist()
+                viewModel.consentedIdentity = identity
+                viewModel.identityPngData = png
+                viewModel.identityVerificationError = nil
+                await viewModel.refreshPhotorealIdentity()
+            } catch let e as TestPersona.PersonaError {
+                viewModel.identityVerificationError = e.description
+            } catch {
+                viewModel.identityVerificationError = "Test persona load failed: \(error)"
+            }
+        }
     }
 
     /// Spawn the async self-capture task. We hop off the SwiftUI button action onto a

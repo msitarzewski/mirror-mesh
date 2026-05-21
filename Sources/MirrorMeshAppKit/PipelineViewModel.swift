@@ -707,6 +707,31 @@ public final class PipelineViewModel: ObservableObject {
         // for the now-promoted pipeline reference.
         oldTask?.cancel()
         Task { await oldPipeline?.stop() }
+
+        // M37 handoff bug fix: any stages that were loaded on the OLD preview pipeline
+        // (voice, translation, photoreal) didn't transfer — they live on the preview
+        // instance we're stopping. Re-fire the enable toggles against the newly-promoted
+        // live pipeline so the live frame path actually sees those stages. Without this,
+        // the inspector reads "Photoreal: ON" but the live pipeline runs pure passthrough.
+        if voiceActive {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.setVoiceEnabled(true)
+            }
+        }
+        if translationActive {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let opts = self.translationOptionsFromSettings()
+                await self.setTranslationEnabled(true, options: opts)
+            }
+        }
+        if photorealActive {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.setPhotorealEnabled(true)
+            }
+        }
     }
 
     private func recordError(_ stage: StageID, _ msg: String) async {
