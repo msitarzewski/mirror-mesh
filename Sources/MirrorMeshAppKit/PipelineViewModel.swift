@@ -496,10 +496,23 @@ public final class PipelineViewModel: ObservableObject {
         let fm = FileManager.default
         var candidates: [URL] = []
 
+        // 0) Explicit env-var override — same one the tests honor. Wins over auto-detection
+        //    so a contributor can point the app at any directory without recompiling.
+        if let env = ProcessInfo.processInfo.environment["MIRRORMESH_LIVEPORTRAIT_MODELS_DIR"],
+           !env.isEmpty {
+            candidates.append(URL(fileURLWithPath: env, isDirectory: true))
+        }
+
         // 1) Dev / repo-root probe. `CommandLine.arguments[0]` is the executable; walk up
         //    until we find a sibling `Package.swift` and then look at `models/`. This catches
         //    `swift run mirrormesh-app` from `/Users/<u>/.../mirror-mesh/`.
-        if let exe = URL(string: CommandLine.arguments.first ?? "") {
+        //    Why fileURLWithPath: arguments[0] is a filesystem path, not a URL string.
+        //    URL(string:) on a path without scheme returns a schemeless URL whose
+        //    .deletingLastPathComponent + .appendingPathComponent path math silently drops
+        //    the absolute root — detection then quietly fails. Bug fixed 2026-05-20.
+        let exePath = CommandLine.arguments.first ?? ""
+        if !exePath.isEmpty {
+            let exe = URL(fileURLWithPath: exePath)
             var dir = exe.deletingLastPathComponent()
             for _ in 0..<8 {
                 let pkg = dir.appendingPathComponent("Package.swift")
@@ -537,6 +550,14 @@ public final class PipelineViewModel: ObservableObject {
                 return dir
             }
         }
+        // Print the candidate list so the user can see what paths were tried. Stderr only,
+        // no popup — the inspector's "not available" branch surfaces the user-facing message.
+        FileHandle.standardError.write(
+            ("[mirrormesh] photoreal detection: no candidate contained all of " +
+             "\(photorealRequiredFiles.joined(separator: ", ")). " +
+             "Candidates tried (in order):\n" +
+             candidates.map { "  - \($0.path)" }.joined(separator: "\n") + "\n").data(using: .utf8) ?? Data()
+        )
         return nil
     }
 

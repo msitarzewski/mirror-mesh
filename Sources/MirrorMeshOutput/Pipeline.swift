@@ -760,33 +760,48 @@ public actor Pipeline {
                 }
             }
 
-            // v1.1.0: photoreal substitution. When a backend is loaded AND we're rendering in
-            // a non-Wireframe style (Mirror or Mask), the photoreal output REPLACES the camera
-            // pixel buffer that gets handed to the renderer. The substitution happens upstream
-            // of render so:
-            //   • The renderer's existing passthrough pipeline draws the photoreal face as the
-            //     base layer (where the camera image used to be).
-            //   • The stylized 3D head overlay is suppressed for substituted frames — the
-            //     photoreal frame IS the face, doubling up would look broken.
+            // v1.1.0: photoreal face composite. When a backend is loaded AND we're rendering in
+            // a non-Wireframe style (Mirror or Mask), the photoreal output is composited as a
+            // FEATHERED QUAD at the face bounding-box location, OVER the live camera passthrough.
+            // The user's background, hair, neck and shoulders stay visible — only the face
+            // region is replaced by the generator's output.
+            //
+            // Why a quad composite (v1.1+) rather than the v1.0 full-buffer substitution: the
+            // v1.0 path handed a 256x256 photoreal buffer to the renderer's passthrough as the
+            // new "source", which then aspect-stretched it to 640x360, lost the user's actual
+            // background, and floated the head off-center. The composite path anchors the
+            // photoreal face to where Vision found the face each frame and keeps the rest of
+            // the live frame intact.
+            //
+            // Contract:
+            //   • Passthrough draws the live camera frame as before.
+            //   • The photoreal quad composites over the passthrough at `bboxNorm` with a soft
+            //     edge feather (~10% of bbox size) so the seam is invisible.
+            //   • The stylized 3D head overlay is suppressed for this frame — the photoreal
+            //     face IS the face, doubling up would look broken.
             //   • Landmark / mesh overlays still draw on top, anchored to the original capture's
             //     landmark coords (the photoreal face occupies the same pixel space).
             //   • Watermark / manifest / chirp paths are unchanged — the watermarker signs the
             //     final rendered output, the manifest records the session with photoreal_active,
             //     and the chirp (if voice/translation is active) still plays. R12: no bypass.
             //
-            // Wireframe is the debug view; substituting would hide the camera + landmarks + the
-            // small stylized ghost that's its whole point. We explicitly skip the substitution
+            // Wireframe is the debug view; compositing would hide the camera + landmarks + the
+            // small stylized ghost that's its whole point. We explicitly skip the composite
             // path when `isWireframeStyle == true`.
-            var renderInput: CapturedFrame = captured
+            var photorealCompositeInput: Renderer.PhotorealComposite? = nil
             var renderStylizedPayload: Renderer.StylizedHeadPayload? = stylizedPayload
             if options.rendererOptions.isWireframeStyle == false,
                let pstage = self.photorealStage {
                 let active = await pstage.hasIdentity
                 if active {
-                    if let substituted = await pstage.apply(captured) {
-                        renderInput = captured.with(pixelBuffer: substituted)
-                        // Photoreal output replaces the face — drop the stylized head overlay
-                        // for this frame so we don't composite a second face on top.
+                    if let photorealBuf = await pstage.apply(captured),
+                       let bbox = landmarks?.faceBoundingBoxNorm {
+                        photorealCompositeInput = Renderer.PhotorealComposite(
+                            pixelBuffer: photorealBuf,
+                            bboxNorm: bbox
+                        )
+                        // Photoreal composite occupies the face region — drop the stylized head
+                        // overlay for this frame so we don't composite a second face on top.
                         renderStylizedPayload = nil
                     }
                     // hasIdentity is sticky-true once flipped, so any tick where the stage is
@@ -797,10 +812,11 @@ public actor Pipeline {
 
             // Render
             let renderStart = MirrorMeshCore.hostTimeNs()
-            guard let rendered = renderer.render(captured: renderInput,
+            guard let rendered = renderer.render(captured: captured,
                                                   landmarks: landmarks,
                                                   blendshapes: blendshapes,
-                                                  stylizedHead: renderStylizedPayload) else {
+                                                  stylizedHead: renderStylizedPayload,
+                                                  photoreal: photorealCompositeInput) else {
                 await Telemetry.shared.emit(.warning(stage: .render, message: "render returned nil"))
                 // Close pipeline signpost on early-out so Instruments doesn't show an open interval.
                 Signpost.end(Signpost.pipeline, frame: captured.frameID, id: pipelineSp)

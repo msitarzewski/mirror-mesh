@@ -739,11 +739,15 @@ public actor PhotorealBackend {
             throw LoadError.inferenceShapeMismatch("generator_v1.prediction shape=\(predShape)")
         }
 
-        // (5) MLMultiArray -> CVPixelBuffer (BGRA, 256x256). Downscales 512->256 in CIContext
-        // so the renderer's existing 256-square texture pool is reused without changes.
+        // (5) MLMultiArray -> CVPixelBuffer (BGRA, 512x512). Keep the generator's native 512
+        // resolution: with the v1.1 PhotorealOverlay path the renderer wraps this directly as
+        // a Metal texture and the bilinear sampler scales it to face-bbox size, so the extra
+        // resolution shows as ~4x perceived sharpness on a typical face crop with zero extra
+        // CPU cost (we previously paid for the 512->256 downscale and then re-upscaled on the
+        // GPU anyway). Return type and BGRA format are unchanged.
         let outputBuffer = try PixelBufferConversion.makePixelBuffer(
             from: prediction,
-            outputSize: 256,
+            outputSize: 512,
             ciContext: self.ciContext
         )
         return outputBuffer

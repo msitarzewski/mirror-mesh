@@ -92,6 +92,10 @@ public final class Renderer: @unchecked Sendable {
     private let avatarMask: AvatarMask
     public let meshRenderer: FaceMeshRenderer
     public let stylizedHead: StylizedHeadRenderer
+    /// v1.1 photoreal composite: draws the photoreal generator output as a feathered quad
+    /// over the live passthrough at the face bbox each frame. Replaces the v1.0 full-buffer
+    /// substitution path that was aspect-stretching a 256x256 square to the full viewport.
+    public let photorealOverlay: PhotorealOverlay
 
     public init(context: MetalContext,
                 outputSize: (width: Int, height: Int),
@@ -106,12 +110,28 @@ public final class Renderer: @unchecked Sendable {
         self.avatarMask = try AvatarMask(context: context)
         self.meshRenderer = try FaceMeshRenderer(context: context)
         self.stylizedHead = try StylizedHeadRenderer(context: context)
+        self.photorealOverlay = try PhotorealOverlay(context: context)
+    }
+
+    /// Per-frame photoreal composite input handed to `render(...)`. When non-nil, the renderer
+    /// wraps `pixelBuffer` as a Metal texture and composites it as a feathered quad at
+    /// `bboxNorm` (Vision normalized image-space, origin top-left) over the camera passthrough.
+    /// The stylized 3D head payload should be omitted by the caller for the same frame —
+    /// composing a procedural head on top of a photoreal face would double the head.
+    public struct PhotorealComposite {
+        public var pixelBuffer: CVPixelBuffer
+        public var bboxNorm: CGRect
+        public init(pixelBuffer: CVPixelBuffer, bboxNorm: CGRect) {
+            self.pixelBuffer = pixelBuffer
+            self.bboxNorm = bboxNorm
+        }
     }
 
     public func render(captured: CapturedFrame,
                        landmarks: LandmarkFrame?,
                        blendshapes: BlendshapeFrame?,
-                       stylizedHead payload: StylizedHeadPayload? = nil) -> RenderedFrame? {
+                       stylizedHead payload: StylizedHeadPayload? = nil,
+                       photoreal photorealComposite: PhotorealComposite? = nil) -> RenderedFrame? {
         TelemetryBus.emit(.stageStart(stage: .render,
                                       frame: captured.frameID,
                                       hostTimeNs: MirrorMeshCore.hostTimeNs()))
@@ -154,6 +174,27 @@ public final class Renderer: @unchecked Sendable {
 
         passthrough.encode(into: enc, source: sourceTexture)
 
+        // v1.1: photoreal face composite. Sits BETWEEN the camera passthrough (background +
+        // hair + neck + shoulders stay visible from the live frame) and the landmark / mesh /
+        // stylized layers (which still draw on top, anchored to the original capture's
+        // landmark coords). The bbox is the same one Vision reported for this frame, so the
+        // photoreal face lands exactly where the operator's face actually is.
+        //
+        // Kept alive across GPU completion via the `cvPhotoreal` slot below — the
+        // `CVMetalTexture` wrapper must outlive the command buffer's commit.
+        var cvPhotoreal: CVMetalTexture?
+        if let composite = photorealComposite,
+           let (cv, tex) = context.makeTexture(from: composite.pixelBuffer, usage: [.shaderRead]) {
+            cvPhotoreal = cv
+            photorealOverlay.encode(
+                into: enc,
+                photorealTexture: tex,
+                bboxNorm: composite.bboxNorm,
+                viewportWidth: outputWidth,
+                viewportHeight: outputHeight
+            )
+        }
+
         if options.showLandmarks, let lm = landmarks, !lm.points.isEmpty {
             landmarkOverlay.encode(into: enc,
                                    landmarks: lm,
@@ -181,7 +222,13 @@ public final class Renderer: @unchecked Sendable {
         // M56: the stylized 3D head composites on top of all other layers. Empty payload is a
         // no-op (no identity loaded). The renderer is the only layer that touches the stylized
         // head's Metal pipeline — MirrorMeshReenact stays free of Metal imports.
-        if let payload = payload {
+        //
+        // v1.1 guard: when a photoreal composite is active for this frame, suppress the
+        // stylized head. The photoreal face occupies the same screen region; drawing the
+        // procedural puppet on top would composite a second face. Callers should already
+        // pass `stylizedHead: nil` in that case (Pipeline does), but enforce it at the
+        // render boundary so a stale caller can't double-draw.
+        if let payload = payload, photorealComposite == nil {
             // Style-dependent sizing. `headScale` is NDC-relative (the projection maps to the
             // [-1, 1] envelope), not bbox-relative — so a value of 1.0 fills the entire viewport
             // height. Calibrated for typical webcam framing (face ≈ 30-40% of frame):
@@ -212,6 +259,7 @@ public final class Renderer: @unchecked Sendable {
         // Keep CVMetalTexture handles alive through GPU completion.
         _ = cvSource
         _ = cvDest
+        _ = cvPhotoreal
 
         TelemetryBus.emit(.stageEnd(stage: .render,
                                     frame: captured.frameID,
