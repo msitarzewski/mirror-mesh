@@ -203,21 +203,45 @@ public struct IdentityInspector: View {
                 }
             }
         } else if let id = viewModel.consentedIdentity {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
+            // v1.3: the source-PNG thumbnail is the load-bearing UX cue here. Without it
+            // the user can't tell at a glance whether the loaded identity is their real
+            // capture, the test persona, or some other .mmid from disk — and with the
+            // 2026-05-25 photoreal substitution working, "what face is going to come
+            // out of the generator" is the question the inspector exists to answer.
+            // Falls back to the icon-only layout when identityPngData is unavailable
+            // (mid-load race, malformed bundle).
+            HStack(alignment: .top, spacing: 8) {
+                if let png = viewModel.identityPngData, let ns = NSImage(data: png) {
+                    Image(nsImage: ns)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .strokeBorder(.white.opacity(0.25), lineWidth: 0.5)
+                        )
+                        .help("Source PNG the photoreal pipeline is driving from")
+                } else {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(.green)
-                    Text("Loaded: \(id.display_name)")
+                        .font(.title2)
+                        .frame(width: 48, height: 48)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(id.display_name)
                         .font(.callout.weight(.medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    Text("\(schemeDisplayName(id.scheme)) · scope \(id.scope)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("id: \(id.identity_id.prefix(8))…")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
                 }
-                Text("\(schemeDisplayName(id.scheme)) · scope \(id.scope)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text("id: \(id.identity_id.prefix(8))…")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
             }
         } else {
             HStack(spacing: 6) {

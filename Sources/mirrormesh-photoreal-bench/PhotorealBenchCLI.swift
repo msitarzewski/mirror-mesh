@@ -131,10 +131,17 @@ struct PhotorealBenchCLI {
         }
         let driverBuffer = try makePixelBuffer(fromPNG: driverPNG)
 
-        // (5) Run the per-frame forward.
+        // (5) Run the per-frame forward. When --dump-tensors is set, PhotorealBackend
+        //     writes each submodel boundary's MLMultiArray to <dir>/<name>.bin (raw
+        //     float32) + <dir>/<name>.json (shape + dtype). This is the Phase 2 v2 plan
+        //     gating tool: every MPSGraph submodel port has to numerically match the
+        //     CoreML reference on the same input, and that diff lives in these files.
         let output: CVPixelBuffer
         do {
-            output = try await backend.reenact(driver: driverBuffer)
+            output = try await backend.reenact(
+                driver: driverBuffer,
+                tensorDumpDir: args.tensorDumpDir
+            )
         } catch let e as PhotorealBackend.LoadError {
             throw BenchError(message: "reenact failed: \(e.description)", exitCode: 5)
         } catch {
@@ -143,6 +150,9 @@ struct PhotorealBenchCLI {
         let tAfterReenact = MirrorMeshCore.hostTimeNs()
         if !args.quiet {
             print("reenact:        \(formatMs(tAfterReenact - tAfterInit))")
+            if let dumpDir = args.tensorDumpDir {
+                print("tensor dump:    \(dumpDir.path)")
+            }
         }
 
         // (6) Write output as PNG.
@@ -281,6 +291,10 @@ struct PhotorealBenchCLI {
             --out <output.png> \\
             [--kind liveportrait|fomm]   default: liveportrait
             [--models-dir <dir>]         default: ./models
+            [--dump-tensors <dir>]       dump each submodel boundary's MLMultiArray to <dir>/
+                                          as <name>.bin (raw float32) + <name>.json (shape).
+                                          Phase 2 v2 plan validation tool — diff against the
+                                          Python reference to certify MPSGraph submodel ports.
             [--quiet]                    machine-readable: prints only the output path on success
 
         Output:
@@ -303,6 +317,7 @@ struct Args {
     let outURL: URL
     let kind: PhotorealBackendKind
     let modelsDir: URL
+    let tensorDumpDir: URL?
     let quiet: Bool
 
     init(args: [String]) throws {
@@ -332,6 +347,11 @@ struct Args {
         self.outURL    = URL(fileURLWithPath: outPath)
         self.kind      = kind
         self.modelsDir = URL(fileURLWithPath: modelsDirPath)
+        if let dumpPath = value("--dump-tensors") {
+            self.tensorDumpDir = URL(fileURLWithPath: dumpPath)
+        } else {
+            self.tensorDumpDir = nil
+        }
         self.quiet     = args.contains("--quiet")
     }
 }

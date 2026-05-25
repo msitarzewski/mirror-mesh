@@ -8,23 +8,29 @@ The 2026-05-20 pause is over. **The Swift LivePortrait inference graph is correc
 
 **Working app**: live camera → real Vision landmarks → geometric or CoreML solver → **stylized 3D head reenactment gated on `ConsentedIdentity`** → optional **voice (Apple on-device Speech)** + **translation (Ollama) + TTS (AVSpeechSynthesizer) + audio-driven lip-sync overlay** on mouth region → Metal rendering (Wireframe / Mirror / Mask + stylized head composite) → Ed25519 watermark + visible badge + audible disclosure chirp + signed manifest → SwiftUI window with operator PIP, Identity Inspector (Capture-as-identity + Use Test Persona buttons), Voice Inspector, Translation Inspector, toolbar activity pills.
 
-**Photoreal v1.3 driver-crop fix (uncommitted)**:
+**Photoreal v1.3 driver-crop fix (committed `a3b599d`)**:
 - `PixelBufferConversion.expandedAndSquaredCrop(faceBoundingBoxNorm:imageSize:paddingFraction:)` + `cropped(_:to:ciContext:)` in `MirrorMeshReenact`
 - `PhotorealStage.apply(_:faceBoundingBoxNorm:)` pre-crops the driver to the Vision face bbox + 25% padding before handing to the backend
 - `Pipeline.swift` passes the bbox through (was fetching it AFTER apply, only for the composite)
 - `Sources/mirrormesh-photoreal-bench/PhotorealBenchCLI.swift` — standalone inference CLI for fixture-based testing per `memory feedback_ml_integration_validation.md`
-- `Tests/MirrorMeshReenactTests/FaceBoxCropTests.swift` — 5 new tests (math + buffer dims). 214/41 green (was 209/40).
+- `Tests/MirrorMeshReenactTests/FaceBoxCropTests.swift` — 5 new tests (math + buffer dims).
 
-**First action to validate end-to-end**:
-```bash
-swift run mirrormesh-app
-# Click "Capture as my identity" → wait for chirp → switch style to Mirror or Mask
-# Should now see a recognizable face substitution, not a peach blob
-```
+**Live UI validation (2026-05-25)**: "JPG over my face, head tracking working, mouth was off but way closer than anything we've done before." Photoreal substitution working end-to-end for the first time.
 
-If it still looks broken, the next step is to run `mirrormesh-photoreal-bench --source <your_default.mmid>/source.png --driver <a-camera-still.png>` and compare — that isolates the IdentitySelfCapture path from the live pipeline path.
+**Photoreal v1.4 follow-ups + Phase 2 tooling**:
+- `Renderer.swift` + `Pipeline.swift`: lip-sync ghost overlay — the audio-driven mouth motion renders at 0.18 scale as a small puppet cue over the photoreal face (supplements LP's approximate mouth tracking with audio precision)
+- `IdentityInspector.swift`: 48px source-PNG thumbnail in the inspector — the loaded identity is now unambiguous at a glance
+- `PhotorealBackend.reenact(driver:tensorDumpDir:)` + `mirrormesh-photoreal-bench --dump-tensors <dir>` — writes each submodel-boundary `MLMultiArray` as raw float32 .bin + JSON sidecar. Gating diff tool for the actual MPSGraph submodel porting work in Phase 2 of `memory project_photoreal_v2_plan.md`.
 
-The remaining work in `memory project_photoreal_v2_plan.md` (Phases 2-5: MPSGraph rewrite, zero-copy GPU residency, pipelined async, model distillation) is still valid for the 25-30fps target but is **not urgent for correctness** — it's the performance ladder, not the bug fix.
+**Test count**: 209/40 → 214/41 (Phase 1) → 217/42 (v1.4 + Phase 2 tooling) green.
+
+**Next move when resuming photoreal work**:
+1. Pick smallest LP submodel (motion) and author MPSGraph equivalent
+2. Run `mirrormesh-photoreal-bench --source <fixture> --driver <fixture> --dump-tensors /tmp/coreml/` for CoreML reference tensors
+3. Same against the MPSGraph candidate (`--dump-tensors /tmp/mpsg/`)
+4. Numerically diff `/tmp/coreml/motion.driving.*.bin` vs `/tmp/mpsg/motion.driving.*.bin` — fail-stop if max abs delta > tolerance
+5. Iterate
+6. Then warp → generator → appearance per v2 plan ordering
 
 Measured P50 latency on M5 Max (still valid):
 - Demo / synthetic / 640×360 / geometric solver: e2e 1.46 ms

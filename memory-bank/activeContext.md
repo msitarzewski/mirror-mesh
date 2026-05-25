@@ -1,7 +1,7 @@
 # MirrorMesh — Active Context
 
-**Updated**: 2026-05-25 (photoreal correctness resolved — Phase 1 of v2 plan complete; driver-crop fix uncommitted)
-**Current state machine position**: `APPROVAL` (Phase 1 fix awaiting user review)
+**Updated**: 2026-05-25 (Phase 1 committed `a3b599d`; v1.4 follow-ups + Phase 2 tooling shipped; ready for actual MPSGraph porting)
+**Current state machine position**: `DOCS` (v1.4 batch awaiting commit + memory update)
 **Substate**: `IDLE`
 
 **Photoreal status — verified correct**: The Swift LivePortrait inference graph is correct. Five `mirrormesh-photoreal-bench` runs on `Tests/MirrorMeshReenactTests/fixtures/lp_diff/{s0,d0}.jpg` (LP's own upstream demo assets) settled it:
@@ -15,32 +15,31 @@ Color path, channel order, `transform_keypoint`, appearance/motion/warp/generato
 
 **Actual root cause of 2026-05-20 broken output**: `PhotorealStage.apply` was passing the raw camera frame (`captured.pixelBuffer`) to `PhotorealBackend.reenact(driver:)` with no face-bbox crop. `PixelBufferConversion.makeMLInput` then did a square center-crop — for a 1280×720 camera that's a 720×720 input where the face is only ~30% of area, so LP's motion extractor produced incoherent keypoints. The source side (`IdentitySelfCapture`) was already cropping correctly via `expandedAndSquaredCrop`; the driver side wasn't.
 
-**Fix landed (uncommitted)**:
+**Phase 1 fix committed (`a3b599d`)**:
 - `Sources/mirrormesh-photoreal-bench/PhotorealBenchCLI.swift` — standalone inference CLI for fixture-based testing (Phase 1 deliverable per `memory project_photoreal_v2_plan.md`)
-- `PixelBufferConversion.expandedAndSquaredCrop(faceBoundingBoxNorm:imageSize:paddingFraction:)` — same math as `IdentitySelfCapture`, lives in the shared low-level module so source + driver paths use identical crop policy
+- `PixelBufferConversion.expandedAndSquaredCrop(faceBoundingBoxNorm:imageSize:paddingFraction:)` — same math as `IdentitySelfCapture`, in the shared low-level module
 - `PixelBufferConversion.cropped(_:to:ciContext:)` — pixel-rect → fresh BGRA IOSurface CVPixelBuffer
 - `PhotorealStage.apply(_:faceBoundingBoxNorm:)` — pre-crops the driver when a bbox is supplied
-- `Sources/MirrorMeshOutput/Pipeline.swift` — fetches `landmarks?.faceBoundingBoxNorm` BEFORE the apply call, passes it through (was fetching AFTER, only for the composite)
-- `Tests/MirrorMeshReenactTests/FaceBoxCropTests.swift` — 5 unit tests pinning crop math + buffer dimensions
-- `Tests/MirrorMeshReenactTests/fixtures/lp_diff/{s0,d0}.jpg` + README — fixture set + re-fetch instructions
-- `Package.swift` — adds `mirrormesh-photoreal-bench` executable target
-- **214 tests / 41 suites green** (was 209 / 40)
+- `Pipeline.swift` — fetches `landmarks?.faceBoundingBoxNorm` BEFORE the apply call, passes it through
+- `Tests/MirrorMeshReenactTests/FaceBoxCropTests.swift` — 5 unit tests pinning crop math
+- `Tests/MirrorMeshReenactTests/fixtures/lp_diff/{s0,d0}.jpg` + README
 
-**Next move (UI validation)**:
-```bash
-swift run mirrormesh-app
-# Click "Capture as my identity" → wait for chirp → switch style to Mirror or Mask
-# Should now show coherent face substitution
-```
+**Live UI validation by maintainer (2026-05-25)**: "JPG over my face, head tracking working, mouth was off but way closer than anything we've done before." Phase 1 visually confirmed.
 
-If output is still broken, run `mirrormesh-photoreal-bench --source <your .mmid's source.png> --driver <a-camera-still.png>` to isolate IdentitySelfCapture from the live pipeline.
+**v1.4 follow-ups + Phase 2 tooling (this batch, uncommitted)**:
+- `Renderer.swift` + `Pipeline.swift`: lip-sync ghost overlay — when photoreal is active, the stylized head still renders at 0.18 scale so the audio-driven mouth motion (baked into the procedural mesh via `frame.overlayLipSync`) shows as a small puppet cue over the photoreal face. Supplements LP's approximate mouth tracking with the audio path's precision.
+- `IdentityInspector.swift`: 48px source-PNG thumbnail in the inspector status row so the loaded identity is unambiguous at a glance. Closes the "wait, what identity is loaded?" UX gap from the testing session (user saw a cartoon thumbnail after a toggle and couldn't tell what was active).
+- `PhotorealBackend.swift`: new `tensorDumpDir: URL?` parameter on `reenact(driver:)`, plus `dumpMultiArray` and `dumpFlatFloats` helpers that write each submodel-boundary tensor to `<dir>/<name>.bin` (raw float32) + `<dir>/<name>.json` (shape + dtype + count). Dumps driver.input, source.feature_3d, source.kp_transformed, all 7 motion driving outputs, motion.driving.kp_transformed, warp.warped_feature, warp.occlusion_map, generator.prediction.
+- `mirrormesh-photoreal-bench`: `--dump-tensors <dir>` flag wired to the above. This is the gating diff tool for Phase 2 MPSGraph porting — each submodel rewrite must numerically match the CoreML reference on the same input.
+- `Tests/MirrorMeshReenactTests/TensorDumpTests.swift` — 3 unit tests pinning the dump format.
 
-What IS working (unchanged from v1.0):
-- Trust layer (consent bundles, watermark, chirp, manifest, R12 refusals enforced)
-- Stylized 3D head reenactment in Wireframe (parametric, license-clean)
-- Apple on-device Speech, translation pipeline, capture-as-identity, notarization scaffolding, paper draft v1
+**Test count**: 209/40 → 214/41 (Phase 1) → 217/42 (v1.4 + Phase 2 tooling) green.
 
-Lesson confirmed: the bench-against-fixture approach (`memory feedback_ml_integration_validation.md`) settled in ~1 hour what 6 hours of UI-screenshot iteration on 2026-05-20 couldn't. Treat this as the standard ML-integration workflow going forward.
+**What's STILL working unchanged from v1.0**: trust layer (consent bundles, watermark, chirp, manifest, R12 refusals), Apple on-device Speech, translation pipeline, capture-as-identity, notarization scaffolding, paper draft v1.
+
+**Phase 2-5 of v2 plan**: still valid for the 25-30fps target but no longer urgent for correctness. The tooling layer is shipped; the actual MPSGraph submodel porting is multi-day per submodel and starts in a follow-up session. Order per `memory project_photoreal_v2_plan.md`: motion (smallest, fastest feedback) → warp → generator → appearance.
+
+**Lesson confirmed**: the bench-against-fixture approach (`memory feedback_ml_integration_validation.md`) settled in ~1 hour what 6 hours of UI-screenshot iteration on 2026-05-20 couldn't. Treat this as the standard ML-integration workflow going forward.
 
 ---
 

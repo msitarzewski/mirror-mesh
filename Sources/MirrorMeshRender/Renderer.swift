@@ -223,19 +223,28 @@ public final class Renderer: @unchecked Sendable {
         // no-op (no identity loaded). The renderer is the only layer that touches the stylized
         // head's Metal pipeline — MirrorMeshReenact stays free of Metal imports.
         //
-        // v1.1 guard: when a photoreal composite is active for this frame, suppress the
-        // stylized head. The photoreal face occupies the same screen region; drawing the
-        // procedural puppet on top would composite a second face. Callers should already
-        // pass `stylizedHead: nil` in that case (Pipeline does), but enforce it at the
-        // render boundary so a stale caller can't double-draw.
-        if let payload = payload, photorealComposite == nil {
+        // v1.3 lip-sync-over-photoreal: when a photoreal composite is active AND a stylized
+        // payload is present, we KEEP rendering the stylized head — but at the same compact
+        // "ghost preview" scale Wireframe uses (0.18). This keeps the audio-driven mouth
+        // motion (which deforms the procedural mesh via `frame.overlayLipSync`) visible as
+        // a small puppet cue floating over the photoreal face, since LP's own mouth tracking
+        // is approximate. The full-size head substitute is suppressed (doubling up faces
+        // would look broken); the small ghost is unambiguously an overlay, not the face.
+        if let payload = payload {
             // Style-dependent sizing. `headScale` is NDC-relative (the projection maps to the
             // [-1, 1] envelope), not bbox-relative — so a value of 1.0 fills the entire viewport
             // height. Calibrated for typical webcam framing (face ≈ 30-40% of frame):
             //   Wireframe — tiny ghost preview that coexists with the operator's face + landmarks
             //   Mirror    — head matches face size to act as a translucent replacement
             //   Mask      — head slightly larger than face for hero presentation
-            stylizedHead.options.headScale = options.isWireframeStyle ? 0.18 : 0.42
+            //   Photoreal active — small ghost overlay that surfaces audio-driven mouth motion
+            //                      on top of the photoreal face (regardless of style)
+            let photorealActive = photorealComposite != nil
+            if photorealActive {
+                stylizedHead.options.headScale = 0.18
+            } else {
+                stylizedHead.options.headScale = options.isWireframeStyle ? 0.18 : 0.42
+            }
             do {
                 try stylizedHead.encode(
                     into: enc,

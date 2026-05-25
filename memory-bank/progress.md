@@ -1,20 +1,20 @@
 # MirrorMesh — Progress
 
-**Updated**: 2026-05-20
+**Updated**: 2026-05-25
 
 ---
 
 ## Current Status
 
-**Phase**: v1.0.0 "Ship" — 🟡 CANDIDATE (notarization blocked on user-supplied Team ID; everything else green)
-**Build status**: `swift build` clean across 15 library modules + 9 CLIs + 1 app target
-**Tests**: 149 tests / 29 suites passing under Swift Testing
-**Closed in this session**: M43, M52, M53, M55, M56 (stylized + FOMM scaffold), M57, M58, M59 (v0.6.0); v0.7.0 Voice (Apple Speech on-device); v0.8.0 Translation+lip-sync; v0.9.0 paper draft + protocol spec
-**Open milestones**: M81/M82/M83 (notarization — blocked on Team ID); M75/M76 (paper bench measurements for camera-ready); v0.7→v0.8 pipeline stage integration (CLIs work standalone, pipeline integration is documented but not wired)
+**Phase**: v1.4 "Photoreal Working" — 🟢 ACTIVE. Phase 1 of photoreal v2 plan complete; Phase 2 tooling shipped.
+**Build status**: `swift build` clean across 15 library modules + 10 CLIs (added mirrormesh-photoreal-bench) + 1 app target
+**Tests**: 217 tests / 42 suites passing under Swift Testing
+**Closed today (2026-05-25)**: Photoreal correctness investigation (Phase 1 of v2 plan); driver-side face-crop fix; bench CLI for standalone inference + value-equivalence diffing; lip-sync ghost overlay over photoreal; identity inspector thumbnail; Phase 2 tensor-dump tooling.
+**Open milestones**: M81/M82/M83 (notarization — blocked on Team ID); M75/M76 (paper bench measurements for camera-ready); Phase 2 actual MPSGraph porting (multi-week, gated on user direction); Phase 3-5 of v2 plan (zero-copy GPU, pipelined async, model distillation).
 **License**: **AGPL-3.0-only research project** (ADR-0015 supersedes ADR-0014). Copyright "Michael Sitarzewski".
 **Hardware**: User on M5 Max / 128 GB / 40 GPU cores — ML model selection unconstrained.
-**Open inputs from user**: `DEVELOPMENT_TEAM`, App Store Connect API key, GitHub `<user>/<repo>` URL.
-**Project status (2026-05-20)**: PAUSED. v1.0 infrastructure is shippable; photoreal LivePortrait substitution is wired but produces broken visual output (peach blob + banding). Maintainer set it down — resume when curiosity returns. See `activeContext.md` for the technical state + investigation hypotheses for whoever picks it back up.
+**Open inputs from user**: `DEVELOPMENT_TEAM`, App Store Connect API key, GitHub remote URL.
+**Project status (2026-05-25)**: ACTIVE again. Photoreal substitution visually works end-to-end (user: "JPG over my face, head tracking working, mouth was off but way closer than anything we've done before"). The 2026-05-20 pause is over.
 
 ## Done
 
@@ -48,6 +48,46 @@
   now wires real inference with parity to LivePortrait (separate
   weights, different per-frame graph). scripts/dev/refresh.sh covers
   the "I changed code but don't see it" cache-miss case.
+- 2026-05-25 — **Photoreal v1.3 — Phase 1 of v2 plan, correctness
+  resolved** (commit `a3b599d`). The 2026-05-20 "broken visual output"
+  was a missing face-bbox crop on the driver path, NOT a model graph
+  bug. Five `mirrormesh-photoreal-bench` runs against LP's own upstream
+  demo assets (`Tests/MirrorMeshReenactTests/fixtures/lp_diff/{s0,d0}.jpg`)
+  settled it: `s0→s0` / `d0→d0` faithful self-reconstruction;
+  `d0→s0` / `s0_face_crop→d0` clean cross-identity reenactment;
+  original `s0→d0` failure was just LP warping the source's dress
+  fabric (full-portrait center-crop). Color path, channel order,
+  `transform_keypoint`, and the appearance/motion/warp/generator graph
+  all correct. Fix: `PixelBufferConversion.expandedAndSquaredCrop` +
+  `cropped(_:to:)` in MirrorMeshReenact; `PhotorealStage.apply(_:
+  faceBoundingBoxNorm:)` pre-crops the driver; `Pipeline.swift`
+  passes the bbox through. 5 new tests, 209/40 → 214/41 green. Live
+  UI validation by maintainer: "JPG over my face, head tracking,
+  mouth was off but way closer than anything we've done before."
+  Phase 2-5 of the v2 plan are still valid for the 25fps target
+  but no longer urgent for correctness.
+- 2026-05-25 — **Photoreal v1.4 follow-ups + Phase 2 tooling**:
+  (a) Lip-sync ghost overlay — when photoreal is active, the audio-
+  driven mouth motion (baked into the stylized-head mesh via
+  `frame.overlayLipSync`) renders at 0.18 scale as a small puppet
+  cue over the photoreal face, so LP's approximate mouth tracking is
+  supplemented by the audio path's precision.
+  (b) Identity inspector thumbnail — the inspector now shows a 48px
+  source-PNG preview so the loaded identity is unambiguous at a
+  glance (closes the "wait, what identity is loaded?" UX gap from
+  the 2026-05-25 testing session).
+  (c) Phase 2 v2 plan tooling — `mirrormesh-photoreal-bench
+  --dump-tensors <dir>` writes each LP submodel-boundary `MLMultiArray`
+  to raw float32 .bin + JSON sidecar (driver input, source feature_3d,
+  source kp_transformed, all 7 motion outputs, motion.kp_transformed,
+  warp.warped_feature, warp.occlusion_map, generator.prediction).
+  This is the gating diff tool for incrementally replacing each
+  CoreML submodel with an MPSGraph port — each port must
+  numerically match the CoreML reference on the same input before
+  shipping. Actual MPSGraph porting is multi-day per submodel and
+  starts in a follow-up session (order per v2 plan: motion → warp
+  → generator → appearance).
+  3 new tensor-dump tests. 214/41 → 217/42 green.
 
 ## In Progress
 

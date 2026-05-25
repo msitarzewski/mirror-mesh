@@ -671,6 +671,11 @@ public actor PhotorealBackend {
     ///   ≈ 41 ms / frame total
     ///
     /// - Parameter driver: the live camera frame (any pixel format CIImage can read).
+    /// - Parameter tensorDumpDir: optional directory to dump each submodel-boundary
+    ///   `MLMultiArray` to (Phase 2 v2 plan tooling). When non-nil, each intermediate
+    ///   tensor is written as raw float32 plus a JSON sidecar describing shape + dtype,
+    ///   so a Python validator can compare it against the upstream reference. Skipped
+    ///   when nil — zero overhead on the hot path.
     /// - Returns: a BGRA `CVPixelBuffer` at 256×256 (downscaled from the generator's native
     ///   512×512 to match the renderer's existing texture pool size). The caller owns the
     ///   returned buffer; the pipeline then routes it through the watermark stage exactly as
@@ -679,7 +684,10 @@ public actor PhotorealBackend {
     ///           `LoadError.inferenceShapeMismatch` if a model output disagrees with the
     ///           expected shape contract.
     ///           `PixelBufferConversionError` on marshaling failures.
-    public func reenact(driver: CVPixelBuffer) async throws -> CVPixelBuffer {
+    public func reenact(
+        driver: CVPixelBuffer,
+        tensorDumpDir: URL? = nil
+    ) async throws -> CVPixelBuffer {
         // (1) Driver frame -> (1, 3, 256, 256) RGB float32 in [0, 1]. The same conversion
         // serves both backends; channel order + normalization match each conversion script.
         let driverInput = try PixelBufferConversion.makeMLInput(
@@ -687,20 +695,64 @@ public actor PhotorealBackend {
             targetSize: 256,
             ciContext: self.ciContext
         )
+        if let dir = tensorDumpDir {
+            try Self.dumpMultiArray(driverInput, name: "driver.input", in: dir)
+        }
         switch kind {
         case .liveportrait:
-            return try await reenactLivePortrait(driverInput: driverInput)
+            return try await reenactLivePortrait(driverInput: driverInput, tensorDumpDir: tensorDumpDir)
         case .fomm:
             return try await reenactFOMM(driverInput: driverInput)
         }
     }
 
+    /// Write an `MLMultiArray` to `<dir>/<name>.bin` (raw float32, contiguous, row-major) plus
+    /// `<dir>/<name>.json` with `{shape, dtype, count}`. Phase 2 of the v2 plan needs these
+    /// dumps to validate MPSGraph submodel ports against the current CoreML implementation
+    /// (and against the upstream Python reference): for each submodel rewrite, dump the
+    /// Swift CoreML output, dump the MPSGraph candidate, numpy-load both, assert max abs
+    /// element-wise difference is below a tolerance. Skips silently if write fails — the
+    /// dump path is diagnostic-only, never load-bearing.
+    static func dumpMultiArray(_ array: MLMultiArray, name: String, in dir: URL) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let shape = array.shape.map { $0.intValue }
+        let count = shape.reduce(1, *)
+        guard array.dataType == .float32 else {
+            // For now we only dump float32. Other dtypes would need conversion; tag the
+            // sidecar so a Python loader bails loudly instead of misinterpreting bytes.
+            let sidecar = """
+            {"name":"\(name)","shape":\(shape),"dtype":"\(array.dataType.rawValue)","count":\(count),"error":"non-float32 dtype not dumped"}
+            """
+            try sidecar.data(using: .utf8)!.write(to: dir.appendingPathComponent("\(name).json"))
+            return
+        }
+        let ptr = array.dataPointer.bindMemory(to: Float32.self, capacity: count)
+        let bytes = Data(bytes: ptr, count: count * MemoryLayout<Float32>.stride)
+        try bytes.write(to: dir.appendingPathComponent("\(name).bin"))
+        let sidecar = """
+        {"name":"\(name)","shape":\(shape),"dtype":"float32","count":\(count)}
+        """
+        try sidecar.data(using: .utf8)!.write(to: dir.appendingPathComponent("\(name).json"))
+    }
+
     /// LivePortrait per-frame forward: motion → transform_keypoint → warp → generator.
     /// The cached `feature_3d` and source `kpSource` are reused unchanged for every frame.
-    private func reenactLivePortrait(driverInput: MLMultiArray) async throws -> CVPixelBuffer {
+    /// When `tensorDumpDir` is non-nil, each submodel boundary's `MLMultiArray` is dumped
+    /// for Phase 2 validation diffs against MPSGraph candidate ports.
+    private func reenactLivePortrait(
+        driverInput: MLMultiArray,
+        tensorDumpDir: URL? = nil
+    ) async throws -> CVPixelBuffer {
         guard let feature3D = self.sourceFeature3D,
               let kpSource  = self.sourceKP else {
             throw LoadError.sourceNotPrepared
+        }
+        if let dir = tensorDumpDir {
+            // Source tensors are cached per-session — dump them every call so any single
+            // bench invocation produces a complete fixture set without needing a separate
+            // prepareSource-only mode.
+            try Self.dumpMultiArray(feature3D, name: "source.feature_3d", in: dir)
+            try Self.dumpMultiArray(kpSource,  name: "source.kp_transformed", in: dir)
         }
 
         // (2) Motion network -> all seven outputs, composed via transformKeypoint into
@@ -708,6 +760,16 @@ public actor PhotorealBackend {
         // never sees the raw `kp`; it sees the world-space composed kp.
         let motionOutputs = try await runMotion(image: driverInput, stage: "driving")
         let kpDriving = try Self.transformKeypoint(motionOutputs: motionOutputs)
+        if let dir = tensorDumpDir {
+            try Self.dumpFlatFloats(motionOutputs.pitchBins, shape: [1, motionOutputs.pitchBins.count], name: "motion.driving.pitch", in: dir)
+            try Self.dumpFlatFloats(motionOutputs.yawBins,   shape: [1, motionOutputs.yawBins.count],   name: "motion.driving.yaw",   in: dir)
+            try Self.dumpFlatFloats(motionOutputs.rollBins,  shape: [1, motionOutputs.rollBins.count],  name: "motion.driving.roll",  in: dir)
+            try Self.dumpFlatFloats(motionOutputs.t,         shape: [1, motionOutputs.t.count],         name: "motion.driving.t",     in: dir)
+            try Self.dumpFlatFloats(motionOutputs.exp,       shape: [1, motionOutputs.exp.count],       name: "motion.driving.exp",   in: dir)
+            try Self.dumpFlatFloats([motionOutputs.scale],   shape: [1, 1],                              name: "motion.driving.scale", in: dir)
+            try Self.dumpFlatFloats(motionOutputs.kp,        shape: [1, motionOutputs.kp.count],        name: "motion.driving.kp",    in: dir)
+            try Self.dumpMultiArray(kpDriving, name: "motion.driving.kp_transformed", in: dir)
+        }
 
         // (3) Warp network: (feature_3d, kp_driving, kp_source) -> warped_feature + occlusion_map
         // Note input-name ordering matches `models/training/liveportrait_to_coreml.py`:
@@ -724,7 +786,13 @@ public actor PhotorealBackend {
         // occlusion_map is currently consumed only for telemetry — the SPADE decoder takes
         // only the warped feature volume per the upstream wrapper. Read it to surface model
         // health later; for v1.1 we just verify it exists.
-        _ = warpOut.featureValue(for: "occlusion_map")?.multiArrayValue
+        let occlusionMap = warpOut.featureValue(for: "occlusion_map")?.multiArrayValue
+        if let dir = tensorDumpDir {
+            try Self.dumpMultiArray(warpedFeature, name: "warp.warped_feature", in: dir)
+            if let occ = occlusionMap {
+                try Self.dumpMultiArray(occ, name: "warp.occlusion_map", in: dir)
+            }
+        }
 
         // (4) Generator: warped_feature -> prediction (1, 3, 512, 512)
         let genInput = try MLDictionaryFeatureProvider(dictionary: [
@@ -737,6 +805,9 @@ public actor PhotorealBackend {
         let predShape = prediction.shape.map { $0.intValue }
         guard predShape.count == 4, predShape[0] == 1, predShape[1] == 3 else {
             throw LoadError.inferenceShapeMismatch("generator_v1.prediction shape=\(predShape)")
+        }
+        if let dir = tensorDumpDir {
+            try Self.dumpMultiArray(prediction, name: "generator.prediction", in: dir)
         }
 
         // (5) MLMultiArray -> CVPixelBuffer (BGRA, 512x512). Keep the generator's native 512
@@ -751,6 +822,23 @@ public actor PhotorealBackend {
             ciContext: self.ciContext
         )
         return outputBuffer
+    }
+
+    /// Same shape as `dumpMultiArray` but for flat `[Float32]` buffers (the motion-extractor
+    /// outputs decoded into Swift arrays inside `runMotion`). `shape` is the logical shape
+    /// to record in the sidecar.
+    static func dumpFlatFloats(_ values: [Float32], shape: [Int], name: String, in dir: URL) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let count = shape.reduce(1, *)
+        precondition(count == values.count, "dumpFlatFloats(\(name)): shape \(shape) implies \(count) elements, got \(values.count)")
+        try values.withUnsafeBufferPointer { buf in
+            let bytes = Data(buffer: buf)
+            try bytes.write(to: dir.appendingPathComponent("\(name).bin"))
+        }
+        let sidecar = """
+        {"name":"\(name)","shape":\(shape),"dtype":"float32","count":\(count)}
+        """
+        try sidecar.data(using: .utf8)!.write(to: dir.appendingPathComponent("\(name).json"))
     }
 
     /// FOMM per-frame forward: keypoint(driver) → motion(source + 4 kps) → generator(source +

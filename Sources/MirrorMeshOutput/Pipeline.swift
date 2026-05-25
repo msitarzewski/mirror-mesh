@@ -807,9 +807,15 @@ public actor Pipeline {
                             pixelBuffer: photorealBuf,
                             bboxNorm: bbox
                         )
-                        // Photoreal composite occupies the face region — drop the stylized head
-                        // overlay for this frame so we don't composite a second face on top.
-                        renderStylizedPayload = nil
+                        // v1.3 lip-sync-over-photoreal: keep the stylized payload alive when
+                        // photoreal is active so the audio-driven mouth motion (baked into
+                        // the stylized mesh via frame.overlayLipSync earlier in this frame)
+                        // still has a visible surface. The renderer downsizes the stylized
+                        // head to a small ghost overlay in this case — it reads as a puppet
+                        // cue layered on top of the photoreal face, not a second face.
+                        // LP's own mouth tracking is approximate; this is the cheap way to
+                        // get the audio path's mouth precision visible until Phase 5 model
+                        // alternatives or a 2D mouth-warp shader replace it.
                     } else if framesProcessed % 60 == 0 {
                         // Every ~2s, surface why the composite was skipped so the operator can
                         // diagnose "Photoreal: ON but I don't see any substitution".
