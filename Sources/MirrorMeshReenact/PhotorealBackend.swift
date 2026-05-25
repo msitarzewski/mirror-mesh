@@ -273,7 +273,7 @@ public actor PhotorealBackend {
     ///   - pngBytes: the source PNG payload the header's hash binds to.
     ///   - runtimeVersion: the live MirrorMesh runtime (typically `FaceReenactor.runtimeVersion`).
     ///   - modelsDir: directory containing the expected .mlpackage files for `kind`. The
-    ///                conversion scripts write them to `<repo>/models/` by default.
+    ///                conversion scripts write them to `./models/` (relative to the repo root) by default.
     public init(
         identity: ConsentedIdentity,
         pngBytes: Data,

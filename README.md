@@ -1,12 +1,10 @@
 # MirrorMesh
 
-![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/msitarzewski/mirror-mesh/actions/workflows/ci.yml/badge.svg)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](./LICENSE)
 [![Research only](https://img.shields.io/badge/use-research%20only-orange.svg)](./NOTICE.md)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-black.svg)](./memory-bank/decisions.md)
 [![DCO](https://img.shields.io/badge/DCO-required-orange.svg)](./CONTRIBUTING.md)
-
-> **Maintainers**: replace `<owner>/<repo>` in the CI badge URL with the actual GitHub `owner/repository` once the project is published. See [`docs/ci.md`](./docs/ci.md).
 
 **Realtime expressive telepresence for Apple Silicon, with consent and disclosure built into the architecture.** MirrorMesh ships the same realtime face-reenactment mechanics as a generic deepfake stack, but with a Consent-First Identity Protocol at the load gate, layered cryptographic disclosure on every frame, and an audible signal at every session start. Software defaults are policy. We set the policy to consent.
 
@@ -14,7 +12,7 @@
 
 ## What does it look like
 
-Demo media: see [`assets/demo.mp4`](./assets/demo.mp4) once recorded; until then, the live `mirrormesh-app` window is the demo. Screenshots in [`docs/screenshots/`](./docs/screenshots/).
+No demo media has been published yet — the live `mirrormesh-app` window is the demo. Public screenshots and a recorded session video are planned for a follow-up release once the photoreal path's performance lands its 25-30 fps target (see [`CHANGELOG.md`](./CHANGELOG.md) for the latest progress).
 
 The shipped app shows your face transformed in the hero view, the source camera as a small picture-in-picture inset, a telemetry panel with per-stage P50/P95/P99 latency histograms, and a watermark hero card with a pulsing green dot when signing is live.
 
@@ -23,7 +21,7 @@ The shipped app shows your face transformed in the hero view, the source camera 
 Requires macOS 14+, Apple Silicon, and a full Xcode install (Command Line Tools alone is no longer sufficient as of v0.2.0; see [ADR-0012](./memory-bank/decisions.md)).
 
 ```bash
-git clone https://github.com/<owner>/mirror-mesh.git && cd mirror-mesh
+git clone https://github.com/msitarzewski/mirror-mesh.git && cd mirror-mesh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 swift build
 swift test --skip MirrorMeshStreamTests --skip MirrorMeshVoiceTests --skip MirrorMeshVirtualCameraTests --skip MirrorMeshMediaPipeTests

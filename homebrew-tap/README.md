@@ -1,10 +1,13 @@
 # homebrew-tap
 
-Homebrew formula and cask for [MirrorMesh](https://github.com/<user>/<repo>).
+Homebrew formula and cask scaffolding for [MirrorMesh](https://github.com/msitarzewski/mirror-mesh).
 
-> **Maintainers**: replace `<user>/<repo>` throughout this file (and in
-> `Formula/mirrormesh-bench.rb` + `Casks/mirrormesh.rb`) with the real GitHub
-> `owner/repository` before publishing the tap.
+> **STATUS: NOT YET PUBLISHED.** The instructions below describe the *planned*
+> install flow for the day the tap goes live as `msitarzewski/homebrew-tap`.
+> Right now there is no published Homebrew tap, no notarized `.app`, no
+> GitHub release artifacts. None of the `brew tap` / `brew install` commands
+> below will work yet. Build from source via `swift build` / `swift run`
+> (see the top-level [README](../README.md)) until v1.0 actually ships.
 
 This directory lives inside the main repo during early development. Once it
 stabilizes it moves to a dedicated `homebrew-tap` GitHub repo so that
@@ -13,7 +16,7 @@ stabilizes it moves to a dedicated `homebrew-tap` GitHub repo so that
 ## Install — CLI bench
 
 ```bash
-brew tap <user>/<repo> https://github.com/<user>/<repo>
+brew tap msitarzewski/homebrew-tap https://github.com/msitarzewski/homebrew-tap
 brew install mirrormesh-bench
 
 mirrormesh-bench --help
@@ -27,7 +30,7 @@ no local Swift build, no Xcode required.
 ## Install — `MirrorMesh.app`
 
 ```bash
-brew tap <user>/<repo> https://github.com/<user>/<repo>
+brew tap msitarzewski/homebrew-tap https://github.com/msitarzewski/homebrew-tap
 brew install --cask mirrormesh
 
 open -a MirrorMesh
@@ -86,5 +89,5 @@ spctl --assess --type execute --verbose /Applications/MirrorMesh.app
 ```bash
 brew uninstall mirrormesh-bench
 brew uninstall --cask mirrormesh    # use --zap to also remove caches/prefs
-brew untap <user>/<repo>
+brew untap msitarzewski/homebrew-tap
 ```

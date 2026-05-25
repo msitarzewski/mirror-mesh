@@ -180,7 +180,7 @@ MirrorMesh shows that the hardware moment for trust-preserving realtime telepres
 - **Toolchain**: Xcode-bundled Swift 6.3
 - **Reproduction**:
   ```bash
-  git clone <repo> mirror-mesh && cd mirror-mesh
+  git clone https://github.com/msitarzewski/mirror-mesh.git && cd mirror-mesh
   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
   swift test
   swift run mirrormesh-bench --scenario bench/scenarios/demo.json

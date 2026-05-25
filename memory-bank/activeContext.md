@@ -94,7 +94,7 @@ This is the consumer-Apple-Silicon ceiling as of 2026. ML model selection is NOT
 These don't block M56 but unlock other work:
 - **Apple Developer Team ID** → paste into `Local.xcconfig` (v0.7.0 notarization)
 - **App Store Connect API key** → `xcrun notarytool store-credentials mirrormesh-notary` (v0.7.0)
-- **GitHub `<user>/<repo>` URL** → CI badge + Homebrew tap URLs (v0.7.0)
+- ~~**GitHub `<user>/<repo>` URL**~~ → resolved 2026-05-25: published as [`msitarzewski/mirror-mesh`](https://github.com/msitarzewski/mirror-mesh) (public). CI badge live; Homebrew tap URLs in `homebrew-tap/` updated. Homebrew tap itself not yet published (planned `msitarzewski/homebrew-tap`).
 - **LivePortrait license re-read** — currently filed as research-only; if it's clarified to be compatible with AGPL+Commercial dual, M56 should use it instead of FOMM. Otherwise FOMM.
 - **Pick accessibility-first application** (v0.8.0) — gaze correction / paralysis compensation / multilingual lip-sync.
 - **Pick paper venue** (v0.9.0) — SIGGRAPH / CHI / ASSETS / ACM MM.

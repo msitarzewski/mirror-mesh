@@ -2,17 +2,19 @@
 # attached by .github/workflows/release.yml. No source build — Homebrew users
 # don't want to wait for swift build on every install.
 #
-# Maintainer: replace `<user>/<repo>` below with the actual GitHub owner/repo
-# (e.g. `mirrormesh/mirror-mesh`). The `sha256` placeholder is rewritten by
-# the release workflow (see release-artifacts/release.json) when a new tag
-# is published.
+# STATUS: NOT YET ACTIVE. No GitHub Release artifact exists yet for any version;
+# `url` will 404 until the release workflow attaches the first
+# `mirrormesh-bench-macos-arm64.zip`. `sha256` and `version` are both
+# placeholders the release workflow rewrites at tag time (see
+# release-artifacts/release.json). Maintainers: bump `version` to match the
+# tag and replace `sha256` with the value from `release.json` before publishing.
 class MirrormeshBench < Formula
   desc "MirrorMesh — local-only realtime telepresence bench CLI"
-  homepage "https://github.com/<user>/<repo>"
+  homepage "https://github.com/msitarzewski/mirror-mesh"
   version "0.3.0"
-  url "https://github.com/<user>/<repo>/releases/download/v#{version}/mirrormesh-bench-macos-arm64.zip"
+  url "https://github.com/msitarzewski/mirror-mesh/releases/download/v#{version}/mirrormesh-bench-macos-arm64.zip"
   sha256 "REPLACE_WITH_SHA256_FROM_RELEASE_JSON"
-  license "Apache-2.0"
+  license "AGPL-3.0-only"
 
   depends_on arch: :arm64
   depends_on macos: :sonoma # macOS 14+

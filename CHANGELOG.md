@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.4 — 2026-05-25
+
+### Added
+- **Photoreal lip-sync ghost overlay**: when photoreal is active, the stylized 3D head still renders at 0.18 scale as a small puppet cue over the photoreal face, so the audio-driven mouth motion (baked into the procedural mesh via `frame.overlayLipSync`) remains visible. Supplements LP's approximate mouth tracking with the audio path's precision.
+- **Identity inspector thumbnail**: the inspector now shows a 48px source-PNG preview in the status row so the loaded identity is unambiguous at a glance.
+- **Phase 2 v2 plan tooling — `--dump-tensors`**: `PhotorealBackend.reenact(driver:tensorDumpDir:)` and `mirrormesh-photoreal-bench --dump-tensors <dir>` write each LP submodel-boundary `MLMultiArray` to raw float32 `.bin` plus JSON sidecar (shape + dtype + count). Gating diff tool for incremental MPSGraph porting against the CoreML reference. 3 new tests.
+
+## v1.3 — 2026-05-25
+
+### Fixed
+- **Photoreal driver-side face crop** (the 2026-05-20 "broken visual output" root cause). `PhotorealStage.apply` was passing the raw 1280×720 camera frame to `PhotorealBackend.reenact(driver:)`; the backend's internal square center-crop made the face only ~30% of the input, so LP's motion extractor produced incoherent keypoints. Fixed by pre-cropping the driver to the Vision face bbox + 25% padding before handing to the backend — matching the policy `IdentitySelfCapture` already uses on the source side. Live UI validation: photoreal substitution now visually works end-to-end. The 2026-05-20 pause is over.
+
+### Added
+- **`mirrormesh-photoreal-bench`**: standalone inference CLI that runs `PhotorealBackend.reenact` on PNG source + driver pairs. Per `memory feedback_ml_integration_validation.md`, this is the surgical-instrument layer for validating LP inference outside the UI pipeline. Five fixture runs against the upstream LP demo assets settled the inference-correctness question in under an hour (color path, channel order, `transform_keypoint`, and the appearance/motion/warp/generator graph all correct).
+- **Face-crop helpers** in `PixelBufferConversion`: `expandedAndSquaredCrop(faceBoundingBoxNorm:imageSize:paddingFraction:)` + `cropped(_:to:ciContext:)`. Shared by source + driver paths so the crop policy stays in lockstep.
+- **Phase 1 fixture set** at `Tests/MirrorMeshReenactTests/fixtures/lp_diff/{s0,d0}.jpg` + README. Mirrored from upstream LivePortrait `assets/examples/`. 5 new tests pinning crop math + buffer dimensions.
+
 ## v1.0.0 — 2026-05-20
 
 ### Changed

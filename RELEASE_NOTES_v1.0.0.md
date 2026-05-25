@@ -178,7 +178,7 @@ The reenactment capability with consent gating:
 Three commands from clone to WOW:
 
 ```bash
-git clone https://github.com/<owner>/mirror-mesh.git && cd mirror-mesh
+git clone https://github.com/msitarzewski/mirror-mesh.git && cd mirror-mesh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 swift run mirrormesh-app
 ```

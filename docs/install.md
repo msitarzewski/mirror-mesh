@@ -1,89 +1,97 @@
 # Install
 
-Three supported install paths for MirrorMesh. Pick whichever matches what you
-need.
+Today there is exactly one way to install MirrorMesh: **build from source**.
+Homebrew tap, GitHub Release artifacts, and a notarized `.app` cask are all
+planned for a future release but are not yet published. Those install paths
+are documented at the bottom of this file so contributors know what's coming;
+none of them work as of v1.0.0-dev.
 
-| Method | Gets you | Requires |
-|--------|----------|----------|
-| [Homebrew (CLI)](#homebrew-cli-bench) | `mirrormesh-bench` on `$PATH` | macOS 14+, Apple Silicon, Homebrew |
-| [Homebrew (Cask)](#homebrew-cask-app) | `MirrorMesh.app` in `/Applications` | macOS 14+, Apple Silicon, Homebrew |
-| [GitHub Release page](#github-release-page) | `.app.zip` + bench binary | macOS 14+, Apple Silicon |
-| [Build from source](#build-from-source) | Everything, freshest commits | Xcode 15+, Apple Silicon |
+| Method | Status | Gets you |
+|--------|--------|----------|
+| [Build from source](#build-from-source) | ✅ works today | Everything, freshest commits |
+| [Homebrew (CLI)](#planned-homebrew-cli-bench) | ⏳ planned (v1.1+) | `mirrormesh-bench` on `$PATH` |
+| [Homebrew (Cask)](#planned-homebrew-cask-app) | ⏳ planned (v1.1+) | `MirrorMesh.app` in `/Applications` |
+| [GitHub Release page](#planned-github-release-page) | ⏳ planned (v1.1+) | `.app.zip` + bench binary |
 
-> **Maintainer**: replace `<user>/<repo>` with the published GitHub owner/repo.
+## Build from source
 
-## Homebrew (CLI bench)
+For paper reproducibility, contributions, or just to run the latest `main`:
 
 ```bash
-brew tap <user>/<repo> https://github.com/<user>/<repo>
+git clone https://github.com/msitarzewski/mirror-mesh.git
+cd mirror-mesh
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+swift build
+swift test --skip MirrorMeshStreamTests --skip MirrorMeshVirtualCameraTests --skip MirrorMeshMediaPipeTests
+swift run mirrormesh-app
+swift run mirrormesh-bench --scenario bench/scenarios/demo.json
+```
+
+Requires macOS 14+, Apple Silicon, and a full Xcode install (Command Line
+Tools alone is not sufficient — see [ADR-0012](../memory-bank/decisions.md)).
+
+To produce a signed `.app` locally, see [`notarization.md`](./notarization.md).
+
+---
+
+## Planned: Homebrew (CLI bench)
+
+> Not yet published. The commands below will not work until the
+> `msitarzewski/homebrew-tap` repo exists and a release artifact is attached.
+
+```bash
+brew tap msitarzewski/homebrew-tap https://github.com/msitarzewski/homebrew-tap
 brew install mirrormesh-bench
 
 mirrormesh-bench --help
 ```
 
-The formula installs a prebuilt `mirrormesh-bench` for `macos-arm64`. The
+The formula will install a prebuilt `mirrormesh-bench` for `macos-arm64`. The
 sha256 is pinned to the GitHub Release artifact; if the file changes, brew
 refuses to install — that's intentional.
 
-## Homebrew (Cask app)
+## Planned: Homebrew (Cask app)
+
+> Not yet published. Requires notarization (blocked on user-supplied
+> `DEVELOPMENT_TEAM`). See [`notarization.md`](./notarization.md).
 
 ```bash
-brew tap <user>/<repo> https://github.com/<user>/<repo>
+brew tap msitarzewski/homebrew-tap https://github.com/msitarzewski/homebrew-tap
 brew install --cask mirrormesh
 
 open -a MirrorMesh
 ```
 
-The cask installs the notarized, stapled `MirrorMesh.app` into
-`/Applications`. Because it's notarized, Gatekeeper accepts it on first
+The cask will install the notarized, stapled `MirrorMesh.app` into
+`/Applications`. Because it'll be notarized, Gatekeeper accepts it on first
 launch without the "unidentified developer" prompt.
 
-## GitHub Release page
+## Planned: GitHub Release page
 
-Each tagged release publishes the same artifacts the Homebrew formulas
-consume:
+> Not yet published — the GitHub Releases page at
+> `https://github.com/msitarzewski/mirror-mesh/releases` is empty as of
+> v1.0.0-dev. Once a tagged release lands, each release will publish:
 
-1. Visit `https://github.com/<user>/<repo>/releases`.
-2. Pick a release.
-3. Download `MirrorMesh-macos-arm64.zip` (the app) or
-   `mirrormesh-bench-macos-arm64.zip` (the CLI).
-4. Unzip. For the app, drag it to `/Applications`. For the CLI, move
-   `mirrormesh-bench` somewhere on your `$PATH`.
-
-The `release.json` attached to each release lists the canonical sha256s if
-you want to verify the download:
+1. `MirrorMesh-macos-arm64.zip` (the app)
+2. `mirrormesh-bench-macos-arm64.zip` (the CLI)
+3. `release.json` with the canonical sha256s
 
 ```bash
 shasum -a 256 MirrorMesh-macos-arm64.zip
 # Compare to "app_sha256" in release.json
 ```
 
-## Build from source
-
-For paper reproducibility, contributions, or just to run the latest
-`main`:
-
-```bash
-git clone https://github.com/<user>/<repo>.git mirror-mesh
-cd mirror-mesh
-sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-
-swift build
-swift test
-swift run mirrormesh-app
-swift run mirrormesh-bench --scenario bench/scenarios/demo.json
-```
-
-To produce a signed `.app` locally, see [`notarization.md`](./notarization.md).
+---
 
 ## Verifying an install
 
 ```bash
-# CLI
+# CLI (after Homebrew install)
 which mirrormesh-bench
 mirrormesh-bench --help
 
-# App
+# App (after cask install)
 ls /Applications/MirrorMesh.app
 codesign --verify --deep --strict /Applications/MirrorMesh.app
 spctl --assess --type execute --verbose /Applications/MirrorMesh.app
@@ -96,23 +104,19 @@ an unsigned dev build — fine for local hacking, not for production use.
 ## Uninstall
 
 ```bash
-# Homebrew
+# Built from source — just delete the clone:
+rm -rf /path/to/mirror-mesh
+
+# Once Homebrew install is published:
 brew uninstall mirrormesh-bench
 brew uninstall --cask --zap mirrormesh
-brew untap <user>/<repo>
-
-# Manual
-rm -rf /Applications/MirrorMesh.app
-rm /usr/local/bin/mirrormesh-bench  # or wherever you put it
+brew untap msitarzewski/homebrew-tap
 ```
 
 ## Troubleshooting
 
 - **"can't be opened because Apple cannot check it for malicious software"** —
-  you grabbed the source-built / unsigned bundle. Use the brew cask or the
-  release-page download instead, or right-click → Open once.
-- **`brew install` fails on sha mismatch** — the release file changed
-  between tap publish and download. Run `brew update && brew install` again,
-  or grab the artifact directly from the release page and verify by hand.
+  applies to the notarized cask only (once it exists). Until then, build from
+  source via `swift build` / `swift run`.
 - **`mirrormesh-bench --scenario` fails on permission** — bench writes to
   `bench/out/` relative to `$PWD`. Run it from a writable directory.
