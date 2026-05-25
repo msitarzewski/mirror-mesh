@@ -191,8 +191,8 @@ jobs:
           retention-days: 90
 
       - name: Create GitHub Release
-        # Why: pinned by major; softprops/action-gh-release@v2 is the current stable line.
-        uses: softprops/action-gh-release@v2
+        # Why: pinned by major; softprops/action-gh-release@v3 is the current stable line.
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
