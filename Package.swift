@@ -44,6 +44,7 @@ let package = Package(
         .executable(name: "mirrormesh-listen", targets: ["mirrormesh-listen"]),
         .executable(name: "mirrormesh-consent", targets: ["mirrormesh-consent"]),
         .executable(name: "mirrormesh-translate", targets: ["mirrormesh-translate"]),
+        .executable(name: "mirrormesh-photoreal-bench", targets: ["mirrormesh-photoreal-bench"]),
     ],
     dependencies: [
         // Pre-built libwebrtc binary Swift package (Apache 2.0). Opt-in: only MirrorMeshStream
@@ -323,7 +324,14 @@ let package = Package(
         .testTarget(
             name: "MirrorMeshReenactTests",
             dependencies: ["MirrorMeshReenact", "MirrorMeshWatermark", "MirrorMeshCore"],
-            path: "Tests/MirrorMeshReenactTests"
+            path: "Tests/MirrorMeshReenactTests",
+            // Why exclude: fixtures/lp_diff/ holds reference PNGs/JPGs the
+            // mirrormesh-photoreal-bench CLI uses for value-equivalence diffing
+            // against upstream LivePortrait. They're read directly off disk by
+            // the bench (not the test target), so SPM has no reason to bundle
+            // or process them — exclude silences the "unhandled files" warning
+            // without making them harder to find for the bench's docs path.
+            exclude: ["fixtures"]
         ),
 
         // ── ConsentedIdentity bundle CLI (M57) ──────────────────────────
@@ -353,6 +361,23 @@ let package = Package(
             name: "MirrorMeshTranslateTests",
             dependencies: ["MirrorMeshTranslate", "MirrorMeshReenact", "MirrorMeshCore"],
             path: "Tests/MirrorMeshTranslateTests"
+        ),
+
+        // ── Photoreal inference bench CLI (Phase 1 of v2 photoreal plan) ────
+        // Why: lets us run PhotorealBackend.reenact(driver:) standalone on PNG
+        // source + driver inputs, producing a Swift-side artifact we can diff
+        // against the upstream LivePortrait Python reference. The whole point
+        // is to remove every degree-of-freedom from the live UI (camera, color
+        // space, composite, watermark, viewport) so a value-equivalence bug in
+        // the inference graph stops hiding behind 5 other variables.
+        .executableTarget(
+            name: "mirrormesh-photoreal-bench",
+            dependencies: [
+                "MirrorMeshCore",
+                "MirrorMeshWatermark",
+                "MirrorMeshReenact",
+            ],
+            path: "Sources/mirrormesh-photoreal-bench"
         ),
     ]
 )

@@ -1,5 +1,27 @@
 # 260520_photoreal-paused
 
+## STATUS (2026-05-25): RESOLVED — root cause was driver-side face crop, not inference
+
+**Phase 1 of the photoreal v2 plan** (Sources/mirrormesh-photoreal-bench/, Tests/MirrorMeshReenactTests/fixtures/lp_diff/) settled the inference-correctness question in five bench runs:
+
+- `s0→s0`, `d0→d0`: faithful self-reconstruction (color, identity, geometry all correct)
+- `d0→s0`, `s0_face_crop→d0`: clean cross-identity reenactment
+- Original `s0→d0` failure: center-crop pulled in source's dress fabric, not an inference bug
+
+**Swift inference graph, `transform_keypoint`, and color path are all correct.** All four hypotheses in this doc's "Investigation hypotheses" section were wrong.
+
+**Actual root cause:** `PhotorealStage.apply` passed the raw camera frame to `PhotorealBackend.reenact(driver:)` with no face-bbox crop. LP's motion extractor produced garbage from low face-coverage input.
+
+**Fix landed (uncommitted at time of this update):**
+- `PixelBufferConversion.expandedAndSquaredCrop(...)` + `cropped(_:to:)` in MirrorMeshReenact
+- `PhotorealStage.apply(_:faceBoundingBoxNorm:)` parameter
+- `Pipeline.swift` passes `landmarks?.faceBoundingBoxNorm` through
+- 5 new tests in `FaceBoxCropTests.swift`. 214/41 green.
+
+Full context in `memory project_photoreal_v2_plan.md` ("Phase 1 result" section). The remaining work in that plan (Phases 2-5, MPSGraph rewrite + zero-copy GPU + pipelining + model distillation) is still valid for hitting the 25fps target but is **not urgent for correctness** — the live app should now produce coherent reenactment.
+
+---
+
 ## Objective
 
 Wire LivePortrait CoreML graph end-to-end so Mirror/Mask styles in the app substitute the operator's face with a photoreal rendering of a loaded `ConsentedIdentity`. Make the deepfake mechanic visually demonstrable to back the v1.0 demo pitch.

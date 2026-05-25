@@ -2,19 +2,29 @@
 
 > **One-screen state-of-the-project. Read this first after a /compact or fresh session.**
 
-## Status as of 2026-05-20 — PAUSED
+## Status as of 2026-05-25 — PHOTOREAL CORRECTNESS RESOLVED (Phase 1 of v2 plan)
 
-Maintainer set the project down after a long photoreal-debugging session that didn't visually land. Everything ELSE works and ships as v1.0; photoreal needs a fresh empirical pass when curiosity returns. See `memory-bank/activeContext.md` for the technical state + investigation hypotheses for whoever picks it up.
+The 2026-05-20 pause is over. **The Swift LivePortrait inference graph is correct.** The "broken visual output" was rooted in a missing face-bbox crop on the driver path — five `mirrormesh-photoreal-bench` runs against `Tests/MirrorMeshReenactTests/fixtures/lp_diff/` (LP's own upstream demo assets, s0 + d12) settled it in under an hour. Color path, channel order, `transform_keypoint`, appearance/motion/warp/generator are all correct.
 
 **Working app**: live camera → real Vision landmarks → geometric or CoreML solver → **stylized 3D head reenactment gated on `ConsentedIdentity`** → optional **voice (Apple on-device Speech)** + **translation (Ollama) + TTS (AVSpeechSynthesizer) + audio-driven lip-sync overlay** on mouth region → Metal rendering (Wireframe / Mirror / Mask + stylized head composite) → Ed25519 watermark + visible badge + audible disclosure chirp + signed manifest → SwiftUI window with operator PIP, Identity Inspector (Capture-as-identity + Use Test Persona buttons), Voice Inspector, Translation Inspector, toolbar activity pills.
 
-**Photoreal substitution is wired but does NOT produce correct visual output.** All infrastructure is in place (detection, identity gate, PhotorealStage, composite-at-bbox renderer, capture-as-identity, test persona, M37 handoff fix); 209 tests green. The pipeline DOES call the LivePortrait inference graph. But the rendered face is incoherent — peach blob + horizontal banding with the procedural test persona; self-as-source produces output indistinguishable from raw camera passthrough.
+**Photoreal v1.3 driver-crop fix (uncommitted)**:
+- `PixelBufferConversion.expandedAndSquaredCrop(faceBoundingBoxNorm:imageSize:paddingFraction:)` + `cropped(_:to:ciContext:)` in `MirrorMeshReenact`
+- `PhotorealStage.apply(_:faceBoundingBoxNorm:)` pre-crops the driver to the Vision face bbox + 25% padding before handing to the backend
+- `Pipeline.swift` passes the bbox through (was fetching it AFTER apply, only for the composite)
+- `Sources/mirrormesh-photoreal-bench/PhotorealBenchCLI.swift` — standalone inference CLI for fixture-based testing per `memory feedback_ml_integration_validation.md`
+- `Tests/MirrorMeshReenactTests/FaceBoxCropTests.swift` — 5 new tests (math + buffer dims). 214/41 green (was 209/40).
 
-Hypotheses for fix (NONE TESTED — leave for resumer):
-- **Color-space mismatch** in the CVPixelBuffer↔MLMultiArray chain. Banding artifacts are consistent with channel-order or gamma corruption.
-- **`transform_keypoint` math** has subtle bug vs upstream Python reference. Unit tests cover determinism + shape but no value-equivalence against Python.
-- **LivePortrait keypoint detector** wasn't trained on cartoon faces — explains test-persona garbage but not self-as-source degeneracy.
-- **Recommended next move**: run `PhotorealBackend.reenact` standalone with a known-good 256×256 face PNG from LivePortrait's own demo set and `diff` Swift output against upstream Python on the same input. If Swift output matches reference, bug is downstream in composite. If garbage, bug is in inference graph.
+**First action to validate end-to-end**:
+```bash
+swift run mirrormesh-app
+# Click "Capture as my identity" → wait for chirp → switch style to Mirror or Mask
+# Should now see a recognizable face substitution, not a peach blob
+```
+
+If it still looks broken, the next step is to run `mirrormesh-photoreal-bench --source <your_default.mmid>/source.png --driver <a-camera-still.png>` and compare — that isolates the IdentitySelfCapture path from the live pipeline path.
+
+The remaining work in `memory project_photoreal_v2_plan.md` (Phases 2-5: MPSGraph rewrite, zero-copy GPU residency, pipelined async, model distillation) is still valid for the 25-30fps target but is **not urgent for correctness** — it's the performance ladder, not the bug fix.
 
 Measured P50 latency on M5 Max (still valid):
 - Demo / synthetic / 640×360 / geometric solver: e2e 1.46 ms

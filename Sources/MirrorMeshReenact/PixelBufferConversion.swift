@@ -162,6 +162,153 @@ public enum PixelBufferConversion {
     }
 
     // ───────────────────────────────────────────────────────────────────────
+    // Face-bbox crop: take a Vision-normalized bbox + a CVPixelBuffer, return
+    // a new BGRA CVPixelBuffer that's the head-region square crop LivePortrait
+    // wants to see as its input. Lives here (not in MirrorMeshAppKit's
+    // IdentitySelfCapture, which duplicates the same math for the *source*
+    // path) so the *driver* path can call it from MirrorMeshOutput without
+    // a circular dependency on AppKit.
+    //
+    // The 2026-05-20 photoreal "broken visual output" was rooted right here:
+    // PhotorealStage handed `captured.pixelBuffer` straight to the backend
+    // with no face crop, so a 1280×720 camera frame became a 720×720 center
+    // square — LP's motion extractor then tried to extract a face from an
+    // input where the face was ~30% of the area, producing incoherent
+    // keypoints and the peach-blob output. See
+    // `Tests/MirrorMeshReenactTests/fixtures/lp_diff/README.md` for the
+    // bench evidence and `memory project_photoreal_v2_plan.md` for context.
+    // ───────────────────────────────────────────────────────────────────────
+
+    /// Padding fraction applied around a face bbox to produce a head crop.
+    /// 0.25 matches LivePortrait's reference preprocessing and the value
+    /// `IdentitySelfCapture.bboxPaddingFraction` uses on the source side.
+    /// LP's motion extractor wants scalp + chin in frame, not a tight face
+    /// crop — too-tight gives missing hairline and worse expression transfer.
+    public static let faceBoxPaddingFraction: CGFloat = 0.25
+
+    /// Convert a Vision-normalized bbox (origin bottom-left, [0,1] coords) into
+    /// an image-space square pixel rect, expanded by `faceBoxPaddingFraction`,
+    /// center-squared, and clamped to image bounds. Mirrors
+    /// `IdentitySelfCapture.expandedAndSquaredCrop` exactly so the source-side
+    /// crop (live capture-as-identity) and driver-side crop (live pipeline)
+    /// stay in lockstep.
+    public static func expandedAndSquaredCrop(
+        faceBoundingBoxNorm bbox: CGRect,
+        imageSize: CGSize,
+        paddingFraction: CGFloat = faceBoxPaddingFraction
+    ) -> CGRect {
+        let w = imageSize.width
+        let h = imageSize.height
+
+        // 1) Vision bbox (normalized, bottom-left) → top-left pixel rect.
+        let pixelRect = CGRect(
+            x: bbox.origin.x * w,
+            y: (1.0 - bbox.origin.y - bbox.height) * h,
+            width: bbox.width * w,
+            height: bbox.height * h
+        )
+
+        // 2) Expand by padding fraction in all four directions.
+        let padX = pixelRect.width * paddingFraction
+        let padY = pixelRect.height * paddingFraction
+        var expanded = pixelRect.insetBy(dx: -padX, dy: -padY)
+
+        // 3) Center-square so the 256² resize doesn't deform aspect.
+        let side = max(expanded.width, expanded.height)
+        let cx = expanded.midX
+        let cy = expanded.midY
+        expanded = CGRect(
+            x: cx - side / 2,
+            y: cy - side / 2,
+            width: side,
+            height: side
+        )
+
+        // 4) Slide inward to fit image bounds (preserve crop size; off-center
+        //    beats smaller).
+        if expanded.minX < 0 { expanded.origin.x = 0 }
+        if expanded.minY < 0 { expanded.origin.y = 0 }
+        if expanded.maxX > w { expanded.origin.x = w - expanded.width }
+        if expanded.maxY > h { expanded.origin.y = h - expanded.height }
+
+        // 5) If the desired crop is itself larger than the image, fall back to
+        //    a centered max-square.
+        if expanded.width > w || expanded.height > h {
+            let fit = min(w, h)
+            expanded = CGRect(
+                x: (w - fit) / 2,
+                y: (h - fit) / 2,
+                width: fit,
+                height: fit
+            )
+        }
+
+        // Integer-align for exact-pixel CGImage/CIImage cropping.
+        return CGRect(
+            x: expanded.origin.x.rounded(.down),
+            y: expanded.origin.y.rounded(.down),
+            width: expanded.width.rounded(.down),
+            height: expanded.height.rounded(.down)
+        )
+    }
+
+    /// Crop a `CVPixelBuffer` to `pixelRect` (top-left origin, image-space
+    /// pixels) and return a fresh BGRA IOSurface-backed buffer of those exact
+    /// dimensions. Used by `PhotorealStage` to pre-crop the live camera
+    /// driver to the Vision face bbox before handing it to the backend.
+    ///
+    /// The rect MUST be inside the source buffer's bounds — callers should run
+    /// it through `expandedAndSquaredCrop` first so clamping is already applied.
+    /// We assert with a guard rather than silently shrinking because a callsite
+    /// passing an out-of-bounds rect is a bug we want to find loudly.
+    public static func cropped(
+        _ buffer: CVPixelBuffer,
+        to pixelRect: CGRect,
+        ciContext: CIContext = CIContext(options: [.useSoftwareRenderer: false])
+    ) throws -> CVPixelBuffer {
+        let w = Int(pixelRect.width)
+        let h = Int(pixelRect.height)
+        guard w > 0, h > 0 else {
+            throw PixelBufferConversionError.allocationFailed("cropped: zero-area rect \(pixelRect)")
+        }
+
+        // CIImage uses bottom-left origin and the CVPixelBuffer's natural extent
+        // matches its width/height (also bottom-left in CI's coordinate space).
+        // Flip the rect's Y so the top-left input rect crops the right region.
+        let srcH = CGFloat(CVPixelBufferGetHeight(buffer))
+        let cropCI = CGRect(
+            x: pixelRect.origin.x,
+            y: srcH - pixelRect.origin.y - pixelRect.height,
+            width: pixelRect.width,
+            height: pixelRect.height
+        )
+
+        var ciImage = CIImage(cvPixelBuffer: buffer)
+        ciImage = ciImage
+            .cropped(to: cropCI)
+            // Translate so the crop's origin sits at (0, 0) — the destination
+            // buffer is exactly w × h, no padding around the cropped region.
+            .transformed(by: CGAffineTransform(translationX: -cropCI.origin.x, y: -cropCI.origin.y))
+
+        var out: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            w, h,
+            kCVPixelFormatType_32BGRA,
+            [
+                kCVPixelBufferIOSurfacePropertiesKey: [:],
+                kCVPixelBufferMetalCompatibilityKey: true,
+            ] as CFDictionary,
+            &out
+        )
+        guard status == kCVReturnSuccess, let dest = out else {
+            throw PixelBufferConversionError.pixelBufferCreateFailed(status)
+        }
+        ciContext.render(ciImage, to: dest)
+        return dest
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
     // Reverse: MLMultiArray (1, 3, H, W) RGB float32 in [0, 1] -> CVPixelBuffer (BGRA)
     // ───────────────────────────────────────────────────────────────────────
 

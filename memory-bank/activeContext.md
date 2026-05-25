@@ -1,31 +1,46 @@
 # MirrorMesh — Active Context
 
-**Updated**: 2026-05-20 (project paused — photoreal not visually working end-to-end)
-**Current state machine position**: `PAUSED`
-**Substate**: `IDLE` — maintainer set the project down. Resume when curiosity returns.
+**Updated**: 2026-05-25 (photoreal correctness resolved — Phase 1 of v2 plan complete; driver-crop fix uncommitted)
+**Current state machine position**: `APPROVAL` (Phase 1 fix awaiting user review)
+**Substate**: `IDLE`
 
-**Photoreal status — honest**: All the *infrastructure* is wired (mlpackage detection, identity gate, PhotorealStage, composite-at-bbox renderer, capture-as-identity, test persona, M37 handoff fix). Tests are green. The pipeline DOES call into the LivePortrait inference graph. But the rendered visual output is broken — final user screenshot showed a peach-colored blob with horizontal banding artifacts where the photoreal face should have been. Two known failure modes:
+**Photoreal status — verified correct**: The Swift LivePortrait inference graph is correct. Five `mirrormesh-photoreal-bench` runs on `Tests/MirrorMeshReenactTests/fixtures/lp_diff/{s0,d0}.jpg` (LP's own upstream demo assets) settled it:
 
-1. **Self-as-source degeneracy**: the operator's captured face → driven by the operator's own face = output looks like passthrough. Visually indistinguishable from "nothing happened." Was misread as a positive several times across this session.
-2. **Test persona produces garbage**: the procedural cartoony face (`TestPersona.swift`) doesn't have the structure LivePortrait's `MotionExtractor` was trained to find keypoints on, so the warp+generator output is incoherent — peach blob + banding.
+- `s0 → s0` (self): faithful reconstruction
+- `d0 → d0` (self): faithful reconstruction
+- `d0 → s0` and `s0_face_crop → d0` (cross-identity): clean reenactment with correct identity preservation and head-pose transfer
+- Original `s0 → d0` failure mode: center-crop pulled in dress fabric from the full-body portrait, not an inference bug
 
-What probably needs investigation when resuming (none done yet, all hypothesis):
-- Run `PhotorealBackend.reenact` standalone with a known-good 256×256 face PNG (e.g., a celebrity headshot from LivePortrait's own demo set) and compare against upstream's Python reference output on the same input. If the Swift output is also garbage, the inference graph has a math bug. If the Swift output matches reference, the bug is downstream in the composite or somewhere else in the Swift glue.
-- The `transform_keypoint` Swift port (`PhotorealBackend.transformKeypoint`) has unit tests for determinism and shape, but no value-equivalence test against a Python reference. Worth adding.
-- Verify color space: the PNG → MLMultiArray → inference → MLMultiArray → CVPixelBuffer chain crosses sRGB/linear conventions. A mishandled gamma at any step would produce washed-out / incorrect-luminance output. The banding artifact in the final screenshot is consistent with channel-order or precision corruption.
-- `PixelBufferConversion` writes `rgba[p+3] = 255` (alpha opaque) — confirmed. Not the bug.
+Color path, channel order, `transform_keypoint`, appearance/motion/warp/generator are all correct.
 
-What IS working and ships as v1.0:
+**Actual root cause of 2026-05-20 broken output**: `PhotorealStage.apply` was passing the raw camera frame (`captured.pixelBuffer`) to `PhotorealBackend.reenact(driver:)` with no face-bbox crop. `PixelBufferConversion.makeMLInput` then did a square center-crop — for a 1280×720 camera that's a 720×720 input where the face is only ~30% of area, so LP's motion extractor produced incoherent keypoints. The source side (`IdentitySelfCapture`) was already cropping correctly via `expandedAndSquaredCrop`; the driver side wasn't.
+
+**Fix landed (uncommitted)**:
+- `Sources/mirrormesh-photoreal-bench/PhotorealBenchCLI.swift` — standalone inference CLI for fixture-based testing (Phase 1 deliverable per `memory project_photoreal_v2_plan.md`)
+- `PixelBufferConversion.expandedAndSquaredCrop(faceBoundingBoxNorm:imageSize:paddingFraction:)` — same math as `IdentitySelfCapture`, lives in the shared low-level module so source + driver paths use identical crop policy
+- `PixelBufferConversion.cropped(_:to:ciContext:)` — pixel-rect → fresh BGRA IOSurface CVPixelBuffer
+- `PhotorealStage.apply(_:faceBoundingBoxNorm:)` — pre-crops the driver when a bbox is supplied
+- `Sources/MirrorMeshOutput/Pipeline.swift` — fetches `landmarks?.faceBoundingBoxNorm` BEFORE the apply call, passes it through (was fetching AFTER, only for the composite)
+- `Tests/MirrorMeshReenactTests/FaceBoxCropTests.swift` — 5 unit tests pinning crop math + buffer dimensions
+- `Tests/MirrorMeshReenactTests/fixtures/lp_diff/{s0,d0}.jpg` + README — fixture set + re-fetch instructions
+- `Package.swift` — adds `mirrormesh-photoreal-bench` executable target
+- **214 tests / 41 suites green** (was 209 / 40)
+
+**Next move (UI validation)**:
+```bash
+swift run mirrormesh-app
+# Click "Capture as my identity" → wait for chirp → switch style to Mirror or Mask
+# Should now show coherent face substitution
+```
+
+If output is still broken, run `mirrormesh-photoreal-bench --source <your .mmid's source.png> --driver <a-camera-still.png>` to isolate IdentitySelfCapture from the live pipeline.
+
+What IS working (unchanged from v1.0):
 - Trust layer (consent bundles, watermark, chirp, manifest, R12 refusals enforced)
 - Stylized 3D head reenactment in Wireframe (parametric, license-clean)
-- Apple on-device Speech (transcription works)
-- Translation pipeline (Ollama + TTS + lip-sync driver — CLI works, app integration wired)
-- Capture-as-identity mint flow (Vision face crop + signed .mmid persistence works)
-- Notarization scaffolding (waits on user-paste Team ID)
-- Paper draft v1 (7.5k words, real benches)
-- 209 tests / 40 suites green
+- Apple on-device Speech, translation pipeline, capture-as-identity, notarization scaffolding, paper draft v1
 
-Lesson recorded: for ML model integration work, run the inference standalone against a known-good reference input and compare against the upstream Python output BEFORE wiring it into the UI. Optimistic interpretation of UI screenshots wasted real time today.
+Lesson confirmed: the bench-against-fixture approach (`memory feedback_ml_integration_validation.md`) settled in ~1 hour what 6 hours of UI-screenshot iteration on 2026-05-20 couldn't. Treat this as the standard ML-integration workflow going forward.
 
 ---
 

@@ -794,8 +794,14 @@ public actor Pipeline {
                let pstage = self.photorealStage {
                 let active = await pstage.hasIdentity
                 if active {
-                    let photorealBuf = await pstage.apply(captured)
+                    // Fetch the face bbox BEFORE apply so PhotorealStage can pre-crop the
+                    // driver to the head region. Without this the backend's internal
+                    // center-crop turns a wide camera frame into a square that's mostly
+                    // shoulders/background, and LP's motion extractor produces incoherent
+                    // keypoints from the low face-coverage input. See
+                    // Tests/MirrorMeshReenactTests/fixtures/lp_diff/README.md.
                     let bbox = landmarks?.faceBoundingBoxNorm
+                    let photorealBuf = await pstage.apply(captured, faceBoundingBoxNorm: bbox)
                     if let photorealBuf = photorealBuf, let bbox = bbox {
                         photorealCompositeInput = Renderer.PhotorealComposite(
                             pixelBuffer: photorealBuf,

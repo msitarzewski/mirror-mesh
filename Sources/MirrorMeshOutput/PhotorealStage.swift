@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import CoreVideo
 import MirrorMeshCore
 import MirrorMeshReenact
@@ -122,10 +123,21 @@ public final class PhotorealStage: @unchecked Sendable {
     ///     backend threw (logged as telemetry warning; caller falls back to
     ///     the original frame).
     ///
+    /// `faceBoundingBoxNorm` is the Vision-normalized face bbox for this frame
+    /// (origin bottom-left, [0,1] coords — the shape `landmarks.faceBoundingBoxNorm`
+    /// emits). When non-nil, the driver pixel buffer is pre-cropped to the
+    /// padded-and-squared head region before being handed to the backend; when
+    /// nil, the backend's internal center-crop applies — the legacy path,
+    /// which works on already-tight inputs but produces incoherent output on
+    /// wide camera frames (the 2026-05-20 bug).
+    ///
     /// Errors are swallowed by design: a transient model failure must not
     /// kill the live pipeline. Render falls back to the stylized 3D head
     /// for that frame, and the next frame retries.
-    public func apply(_ captured: CapturedFrame) async -> CVPixelBuffer? {
+    public func apply(
+        _ captured: CapturedFrame,
+        faceBoundingBoxNorm: CGRect? = nil
+    ) async -> CVPixelBuffer? {
         let captured_backend: PhotorealBackend? = await withCheckedContinuation {
             (cont: CheckedContinuation<PhotorealBackend?, Never>) in
             queue.async { cont.resume(returning: self.backend) }
@@ -133,8 +145,41 @@ public final class PhotorealStage: @unchecked Sendable {
         guard let backend = captured_backend else {
             return nil
         }
+
+        // Pre-crop the driver to the head region when we have a face bbox.
+        // Without this, PhotorealBackend.reenact's internal center-crop turns
+        // a 1280×720 camera frame into a 720×720 square that includes far
+        // more shoulders/background than face, and LP's motion extractor
+        // produces incoherent keypoints from the resulting low face-coverage
+        // input. The bench fixtures (Tests/MirrorMeshReenactTests/fixtures/lp_diff/)
+        // show this conclusively — cropped face → coherent reenactment;
+        // uncropped portrait → garbled output.
+        let driver: CVPixelBuffer
+        if let bbox = faceBoundingBoxNorm {
+            do {
+                let srcW = CGFloat(CVPixelBufferGetWidth(captured.pixelBuffer))
+                let srcH = CGFloat(CVPixelBufferGetHeight(captured.pixelBuffer))
+                let cropRect = PixelBufferConversion.expandedAndSquaredCrop(
+                    faceBoundingBoxNorm: bbox,
+                    imageSize: CGSize(width: srcW, height: srcH)
+                )
+                driver = try PixelBufferConversion.cropped(captured.pixelBuffer, to: cropRect)
+            } catch {
+                // Crop failed — fall back to the raw frame rather than skip the
+                // frame entirely. The backend's center-crop is suboptimal but not
+                // worse than dropping a frame. Surface the failure for diagnosis.
+                await Telemetry.shared.emit(.warning(
+                    stage: .render,
+                    message: "photoreal face-crop failed (frame=\(captured.frameID)): \(error); falling back to center-crop"
+                ))
+                driver = captured.pixelBuffer
+            }
+        } else {
+            driver = captured.pixelBuffer
+        }
+
         do {
-            return try await backend.reenact(driver: captured.pixelBuffer)
+            return try await backend.reenact(driver: driver)
         } catch {
             // R12: never silently substitute a buffer the model didn't produce.
             // Surface the failure as telemetry and return nil so the renderer
