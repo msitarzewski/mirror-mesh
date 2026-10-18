@@ -48,3 +48,34 @@ struct CoreTests {
         #expect(StageID.allCases.contains(.watermark))
     }
 }
+
+@Suite("GazeChannels")
+struct GazeChannelsTests {
+    @Test func encodeDecodeRoundTrips() {
+        for (h, v) in [(Float(0), Float(0)), (0.5, -0.25), (-0.8, 0.6), (1, -1)] {
+            let decoded = GazeChannels.decode(GazeChannels.encode(horizontal: h, vertical: v))
+            #expect(abs(decoded.horizontal - h) < 1e-6)
+            #expect(abs(decoded.vertical - v) < 1e-6)
+        }
+    }
+
+    @Test func imageRightGazeIsInForLeftEyeAndOutForRightEye() {
+        let c = GazeChannels.encode(horizontal: 0.7, vertical: 0)
+        #expect(c[.eyeLookInLeft] == 0.7)
+        #expect(c[.eyeLookOutRight] == 0.7)
+        #expect(c[.eyeLookOutLeft] == 0)
+        #expect(c[.eyeLookInRight] == 0)
+    }
+
+    @Test func encodeClampsAndOnlyTouchesGazeKeys() {
+        let c = GazeChannels.encode(horizontal: 3, vertical: -3)
+        #expect(Set(c.keys) == Set(GazeChannels.keys))
+        #expect(c.values.allSatisfy { $0 >= 0 && $0 <= 1 })
+    }
+
+    @Test func landmarkFrameDefaultsToNoEyes() {
+        let f = LandmarkFrame(frameID: FrameIDGenerator.shared.next(), hostTimeNs: 0, points: [],
+                              confidence: 1, faceBoundingBoxNorm: .zero)
+        #expect(f.eyes.isEmpty)
+    }
+}

@@ -42,3 +42,23 @@ public enum RenderStyle: String, Codable, Sendable, CaseIterable, Hashable {
         }
     }
 }
+
+/// Which procedural avatar the reenactment pass draws once a consented identity is loaded.
+/// Orthogonal to `RenderStyle` (which decides *how prominently* the avatar composites).
+public enum AvatarKind: String, Codable, Sendable, CaseIterable, Hashable {
+    /// v0.6 parameterized mesh: 292-vertex sphere, 18 stylized shapes solved directly from
+    /// landmarks, faceted toon shading.
+    case classic
+
+    /// SDF head raymarched per pixel in Metal, driven by the solver's ARKit-52 coefficients
+    /// plus head pose and gaze. Eyes, lids, teeth, tongue, hinged jaw, lips, brows, hair.
+    /// Every byte is reproducible from source — no meshes, textures, or weights ship.
+    case expressive
+
+    public var displayName: String {
+        switch self {
+        case .classic:    return "Classic"
+        case .expressive: return "Expressive"
+        }
+    }
+}

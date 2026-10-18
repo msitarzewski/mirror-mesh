@@ -221,7 +221,9 @@ let package = Package(
         .testTarget(
             name: "MirrorMeshRenderTests",
             dependencies: ["MirrorMeshRender"],
-            path: "Tests/MirrorMeshRenderTests"
+            path: "Tests/MirrorMeshRenderTests",
+            // Golden PNGs for ExpressiveHeadTests, read via #filePath (not a bundle resource).
+            exclude: ["Goldens"]
         ),
         .testTarget(
             name: "MirrorMeshWatermarkTests",
@@ -318,6 +320,9 @@ let package = Package(
                 "MirrorMeshCore",
                 "MirrorMeshWatermark",
                 "MirrorMeshVision",
+                // PortraitAnalyzer produces ExpressiveHeadRenderer.Likeness. Render never imports
+                // Reenact, so this edge can't cycle.
+                "MirrorMeshRender",
             ],
             path: "Sources/MirrorMeshReenact"
         ),

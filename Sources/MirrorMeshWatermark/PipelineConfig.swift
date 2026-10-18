@@ -29,7 +29,18 @@ public struct SolverConfig: Codable, Sendable, Equatable {
 
 public struct RenderConfig: Codable, Sendable, Equatable {
     public var overlay: [String]
-    public init(overlay: [String]) { self.overlay = overlay }
+    /// Which procedural avatar drew the reenactment (`AvatarKind.rawValue`). Nil in manifests
+    /// written before the expressive avatar existed.
+    public var avatar: String?
+    /// Accessibility transforms that altered the avatar at any point in the session, one tag per
+    /// kind with its most recent value (`ExpressionTransforms.manifestTags` format, e.g.
+    /// `"symmetry:left:0.80"`). Nil = none.
+    public var expression_transforms: [String]?
+    public init(overlay: [String], avatar: String? = nil, expression_transforms: [String]? = nil) {
+        self.overlay = overlay
+        self.avatar = avatar
+        self.expression_transforms = expression_transforms
+    }
 }
 
 public struct WatermarkConfig: Codable, Sendable, Equatable {
@@ -50,17 +61,29 @@ public struct WatermarkConfig: Codable, Sendable, Equatable {
     /// pixels. Optional + defaulted in Codable so pre-v1.1 manifests
     /// round-trip cleanly (same shape as `voice_transformed`).
     public var photoreal_active: Bool
+    /// True when an accessibility transform (symmetry assist, expression gain, eye-contact
+    /// assist) altered the avatar's expression at any point in the session. Sticky, same
+    /// disclosure semantics as `voice_transformed`; defaulted in Codable for older manifests.
+    public var expression_transformed: Bool
+    /// True when the avatar was drawn with a likeness fitted to the consented identity's portrait
+    /// (proportions, projected skin, depth relief) at any point in the session. Sticky; defaulted
+    /// in Codable for older manifests.
+    public var likeness_mapped: Bool
 
     public init(visible: Bool,
                 signed: Bool,
                 audible_chirp: Bool,
                 voice_transformed: Bool = false,
-                photoreal_active: Bool = false) {
+                photoreal_active: Bool = false,
+                expression_transformed: Bool = false,
+                likeness_mapped: Bool = false) {
         self.visible = visible
         self.signed = signed
         self.audible_chirp = audible_chirp
         self.voice_transformed = voice_transformed
         self.photoreal_active = photoreal_active
+        self.expression_transformed = expression_transformed
+        self.likeness_mapped = likeness_mapped
     }
 
     // Custom decode so pre-v0.7 manifests (no voice_transformed key) round-trip
@@ -74,6 +97,8 @@ public struct WatermarkConfig: Codable, Sendable, Equatable {
         self.audible_chirp = try container.decode(Bool.self, forKey: .audible_chirp)
         self.voice_transformed = try container.decodeIfPresent(Bool.self, forKey: .voice_transformed) ?? false
         self.photoreal_active = try container.decodeIfPresent(Bool.self, forKey: .photoreal_active) ?? false
+        self.expression_transformed = try container.decodeIfPresent(Bool.self, forKey: .expression_transformed) ?? false
+        self.likeness_mapped = try container.decodeIfPresent(Bool.self, forKey: .likeness_mapped) ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -82,6 +107,8 @@ public struct WatermarkConfig: Codable, Sendable, Equatable {
         case audible_chirp
         case voice_transformed
         case photoreal_active
+        case expression_transformed
+        case likeness_mapped
     }
 }
 

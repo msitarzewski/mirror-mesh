@@ -93,3 +93,48 @@ extension ReenactFrame {
         )
     }
 }
+
+// =============================================================================
+// LipSyncARKitBridge — the same overlay, for the ARKit-52 expressive avatar
+// =============================================================================
+//
+// `LipSyncDriver` speaks the classic rig's five mouth shapes. The expressive avatar consumes the
+// solver's ARKit-52 set, so the overlay is translated here (Reenact already owns both vocabularies;
+// Translate stays free of ARKit keys). Contract matches `overlayLipSync`: when the overlay has
+// values, the audio path owns the mouth — mapped keys take the overlay value and the remaining
+// mouth-articulation keys are cleared so the operator's silent mouth doesn't fight the speech.
+// Eyes, brows, cheeks, nose and pose pass through.
+
+public enum LipSyncARKitBridge {
+    /// Classic overlay shape → ARKit keys it drives.
+    public static let mapping: [StylizedBlendshape: [BlendshapeKey]] = [
+        .jawOpen: [.jawOpen],
+        .mouthPucker: [.mouthPucker],
+        .mouthWide: [.mouthStretchLeft, .mouthStretchRight],
+        .smileL: [.mouthSmileLeft],
+        .smileR: [.mouthSmileRight],
+    ]
+
+    /// Mouth keys the overlay takes ownership of (mapped targets plus everything else that
+    /// shapes the lips or jaw).
+    public static let ownedKeys: Set<BlendshapeKey> = [
+        .jawOpen, .jawForward, .jawLeft, .jawRight, .mouthClose, .mouthFunnel, .mouthPucker,
+        .mouthLeft, .mouthRight, .mouthSmileLeft, .mouthSmileRight, .mouthFrownLeft, .mouthFrownRight,
+        .mouthDimpleLeft, .mouthDimpleRight, .mouthStretchLeft, .mouthStretchRight,
+        .mouthRollLower, .mouthRollUpper, .mouthShrugLower, .mouthShrugUpper,
+        .mouthPressLeft, .mouthPressRight, .mouthLowerDownLeft, .mouthLowerDownRight,
+        .mouthUpperUpLeft, .mouthUpperUpRight, .tongueOut,
+    ]
+
+    public static func merge(_ overlay: [StylizedBlendshape: Float],
+                             into coefficients: [BlendshapeKey: Float]) -> [BlendshapeKey: Float] {
+        let relevant = overlay.filter { ReenactFrame.mouthShapeKeysForOverlay.contains($0.key) }
+        guard !relevant.isEmpty else { return coefficients }
+        var out = coefficients
+        for key in ownedKeys { out[key] = 0 }
+        for (shape, value) in relevant {
+            for key in mapping[shape] ?? [] { out[key] = simd_clamp(value, 0, 1) }
+        }
+        return out
+    }
+}

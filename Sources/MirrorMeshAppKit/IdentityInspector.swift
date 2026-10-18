@@ -287,19 +287,28 @@ public struct IdentityInspector: View {
                 }
             }
         } else if viewModel.photorealActive {
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "sparkles")
-                    .foregroundStyle(.green)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Photoreal: ON")
-                        .font(.callout.weight(.medium))
-                    Text("LivePortrait models loaded at \(viewModel.photorealModelsDir?.path ?? "—")")
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+            Button {
+                Task { await viewModel.setPhotorealEnabled(false) }
+            } label: {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Photoreal: ON")
+                            .font(.callout.weight(.medium))
+                        Text("LivePortrait models loaded at \(viewModel.photorealModelsDir?.path ?? "—")")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                        Text("Tap to disable")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .buttonStyle(.plain)
         } else if viewModel.photorealAvailable {
             Button {
                 Task { await viewModel.setPhotorealEnabled(true) }

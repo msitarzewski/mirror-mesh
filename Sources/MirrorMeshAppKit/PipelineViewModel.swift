@@ -3,6 +3,8 @@ import SwiftUI
 import MirrorMeshCore
 import MirrorMeshCapture
 import MirrorMeshRender
+import MirrorMeshSolver
+import MirrorMeshReenact
 import MirrorMeshWatermark
 import MirrorMeshOutput
 import MirrorMeshVoice
@@ -90,6 +92,8 @@ public final class PipelineViewModel: ObservableObject {
     @Published public var photorealModelsDir: URL? = nil
     /// User-facing error from the most recent photoreal-stage attempt. Nil when healthy.
     @Published public var photorealError: String? = nil
+    /// Where `depth_v1.mlpackage` lives, if installed. Nil → likeness fits without relief.
+    @Published public private(set) var likenessModelsDir: URL? = nil
 
     public let ringBuffer: RingBufferSink
     public let settings: AppSettings
@@ -137,6 +141,7 @@ public final class PipelineViewModel: ObservableObject {
             self.photorealAvailable = false
             self.photorealModelsDir = nil
         }
+        self.likenessModelsDir = Self.detectLikenessModelsDir()
     }
 
     /// Start the real pipeline in the requested mode. Defaults to `.live` (camera + Vision).
@@ -177,7 +182,11 @@ public final class PipelineViewModel: ObservableObject {
             voiceEnabled: false,            // turned on post-start via setVoiceEnabled
             voiceLocale: settings.voiceLocale,
             translationEnabled: false,      // turned on post-start via setTranslationEnabled
-            translationOptions: translationOpts
+            translationOptions: translationOpts,
+            avatar: settings.avatarKind,
+            expressionTransforms: settings.expressionTransforms,
+            likenessEnabled: settings.likenessEnabled,
+            likenessModelsDir: likenessModelsDir
         )
         let newPipeline = Pipeline(options: opts, manifestURL: manifestURL, jsonlURL: nil)
 
@@ -271,7 +280,9 @@ public final class PipelineViewModel: ObservableObject {
         // M88/M89 "no gating": auto-enable the photoreal substitution stage if all four
         // LivePortrait mlpackages are present on disk. Models missing → silently stays off
         // and the inspector shows the user the install hint. Fails soft via `photorealError`.
-        if photorealAvailable {
+        // Not with the expressive avatar: photoreal would take over the face (and the frame
+        // budget); it stays one tap away in the Identity inspector.
+        if photorealAvailable && settings.avatarKind != .expressive {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.setPhotorealEnabled(true)
@@ -358,6 +369,22 @@ public final class PipelineViewModel: ObservableObject {
         // separate toggle. Keeping the badge tied to `running` matches what's actually happening
         // to the output frames; previously it could read "idle" even though signing was on.
         watermarkActive = running
+    }
+
+    /// Push the avatar choice + accessibility transforms into the live pipeline (and a pending
+    /// handoff pipeline, so a preview → live swap doesn't drop the operator's settings).
+    public func applyAvatarSettings() {
+        let kind = settings.avatarKind
+        let transforms = settings.expressionTransforms
+        let likeness = settings.likenessEnabled
+        let targets = [pipeline, pendingPipeline].compactMap { $0 }
+        Task {
+            for p in targets {
+                await p.setAvatarKind(kind)
+                await p.setExpressionTransforms(transforms)
+                await p.setLikenessEnabled(likeness)
+            }
+        }
     }
 
     // MARK: - Voice / Translation bridge (v0.7.0 / v0.8.0)
@@ -493,6 +520,15 @@ public final class PipelineViewModel: ObservableObject {
     /// Why @MainActor-safe: pure `FileManager.fileExists` stats; no I/O blocking beyond a
     /// handful of inode lookups. Measured << 1 ms on M5 Max.
     private static func detectPhotorealModelsDir() -> URL? {
+        detectModelsDir(requiredFiles: photorealRequiredFiles, label: "photoreal")
+    }
+
+    /// Likeness depth model (`depth_v1.mlpackage`), same search order as the photoreal weights.
+    private static func detectLikenessModelsDir() -> URL? {
+        detectModelsDir(requiredFiles: [PortraitAnalyzer.depthModelFileName], label: "likeness depth")
+    }
+
+    private static func detectModelsDir(requiredFiles: [String], label: String) -> URL? {
         let fm = FileManager.default
         var candidates: [URL] = []
 
@@ -545,30 +581,18 @@ public final class PipelineViewModel: ObservableObject {
             candidates.append(res.appendingPathComponent("models", isDirectory: true))
         }
 
-        for dir in candidates {
-            if hasAllPhotorealFiles(at: dir, fm: fm) {
-                return dir
-            }
+        for dir in candidates where requiredFiles.allSatisfy({ fm.fileExists(atPath: dir.appendingPathComponent($0).path) }) {
+            return dir
         }
         // Print the candidate list so the user can see what paths were tried. Stderr only,
         // no popup — the inspector's "not available" branch surfaces the user-facing message.
         FileHandle.standardError.write(
-            ("[mirrormesh] photoreal detection: no candidate contained all of " +
-             "\(photorealRequiredFiles.joined(separator: ", ")). " +
+            ("[mirrormesh] \(label) detection: no candidate contained all of " +
+             "\(requiredFiles.joined(separator: ", ")). " +
              "Candidates tried (in order):\n" +
              candidates.map { "  - \($0.path)" }.joined(separator: "\n") + "\n").data(using: .utf8) ?? Data()
         )
         return nil
-    }
-
-    /// True when every required mlpackage is present at `dir`. Used by `detectPhotorealModelsDir`
-    /// to filter partial installs (e.g. a user who downloaded one but not all four weights).
-    private static func hasAllPhotorealFiles(at dir: URL, fm: FileManager) -> Bool {
-        for name in photorealRequiredFiles {
-            let url = dir.appendingPathComponent(name)
-            if !fm.fileExists(atPath: url.path) { return false }
-        }
-        return true
     }
 
     /// Build a `TranslationStageOptions` from the current `AppSettings`. Used by
@@ -832,6 +856,16 @@ public final class AppSettings: ObservableObject {
         public static let translationEnabled       = "mirrormesh.translationEnabled"
         public static let translationTargetLocale  = "mirrormesh.translationTargetLocale"
         public static let ollamaModel    = "mirrormesh.ollamaModel"
+        // Expressive avatar + accessibility transforms.
+        public static let avatarKind              = "mirrormesh.avatarKind"
+        public static let symmetryAssistEnabled   = "mirrormesh.symmetryAssistEnabled"
+        public static let symmetryAffectedSide    = "mirrormesh.symmetryAffectedSide"
+        public static let symmetryStrength        = "mirrormesh.symmetryStrength"
+        public static let expressionGainEnabled   = "mirrormesh.expressionGainEnabled"
+        public static let expressionGain          = "mirrormesh.expressionGain"
+        public static let eyeContactEnabled       = "mirrormesh.eyeContactEnabled"
+        public static let eyeContactStrength      = "mirrormesh.eyeContactStrength"
+        public static let likenessEnabled         = "mirrormesh.likenessEnabled"
     }
 
     /// Default suite name. Tests pass their own to stay isolated.
@@ -857,6 +891,30 @@ public final class AppSettings: ObservableObject {
     @Published public var translationEnabled: Bool { didSet { defaults.set(translationEnabled, forKey: Keys.translationEnabled) } }
     @Published public var translationTargetLocale: String { didSet { defaults.set(translationTargetLocale, forKey: Keys.translationTargetLocale) } }
     @Published public var ollamaModel: String { didSet { defaults.set(ollamaModel, forKey: Keys.ollamaModel) } }
+
+    // Expressive avatar + accessibility. Transforms default off; each has an enable toggle and a
+    // strength so turning one off keeps the operator's tuned value.
+    @Published public var avatarKind: AvatarKind { didSet { defaults.set(avatarKind.rawValue, forKey: Keys.avatarKind) } }
+    @Published public var symmetryAssistEnabled: Bool { didSet { defaults.set(symmetryAssistEnabled, forKey: Keys.symmetryAssistEnabled) } }
+    @Published public var symmetryAffectedSide: ExpressionTransforms.Side { didSet { defaults.set(symmetryAffectedSide.rawValue, forKey: Keys.symmetryAffectedSide) } }
+    @Published public var symmetryStrength: Float { didSet { defaults.set(symmetryStrength, forKey: Keys.symmetryStrength) } }
+    @Published public var expressionGainEnabled: Bool { didSet { defaults.set(expressionGainEnabled, forKey: Keys.expressionGainEnabled) } }
+    @Published public var expressionGain: Float { didSet { defaults.set(expressionGain, forKey: Keys.expressionGain) } }
+    @Published public var eyeContactEnabled: Bool { didSet { defaults.set(eyeContactEnabled, forKey: Keys.eyeContactEnabled) } }
+    @Published public var eyeContactStrength: Float { didSet { defaults.set(eyeContactStrength, forKey: Keys.eyeContactStrength) } }
+    /// Fit the expressive avatar to the loaded identity's portrait. Default on: the portrait is
+    /// already consented (it's the `.mmid` payload) and the manifest discloses the fit.
+    @Published public var likenessEnabled: Bool { didSet { defaults.set(likenessEnabled, forKey: Keys.likenessEnabled) } }
+
+    /// The transforms the pipeline should apply, folded from the toggles + strengths above.
+    public var expressionTransforms: ExpressionTransforms {
+        ExpressionTransforms(
+            symmetry: symmetryAssistEnabled
+                ? .init(affectedSide: symmetryAffectedSide, strength: symmetryStrength) : nil,
+            gain: expressionGainEnabled ? expressionGain : 1,
+            eyeContact: eyeContactEnabled ? eyeContactStrength : 0
+        )
+    }
 
     /// Release builds never let users hide the watermark. We surface that as a locked toggle.
     public let watermarkLockedInRelease: Bool
@@ -886,6 +944,15 @@ public final class AppSettings: ObservableObject {
                 translationEnabled: Bool = true,
                 translationTargetLocale: String = "es-ES",
                 ollamaModel: String = "llama3.2:3b",
+                avatarKind: AvatarKind = .expressive,
+                symmetryAssistEnabled: Bool = false,
+                symmetryAffectedSide: ExpressionTransforms.Side = .left,
+                symmetryStrength: Float = 0.8,
+                expressionGainEnabled: Bool = false,
+                expressionGain: Float = 1.5,
+                eyeContactEnabled: Bool = false,
+                eyeContactStrength: Float = 0.7,
+                likenessEnabled: Bool = true,
                 suiteName: String? = "ai.mirrormesh") {
         // Why: a named suite avoids polluting the host process's standard defaults and lets
         // tests inject a unique suite for isolation. Falls back to standard if the suite fails.
@@ -903,6 +970,16 @@ public final class AppSettings: ObservableObject {
         self.translationEnabled      = (store.object(forKey: Keys.translationEnabled)  as? Bool) ?? translationEnabled
         self.translationTargetLocale = store.string(forKey: Keys.translationTargetLocale)  ?? translationTargetLocale
         self.ollamaModel             = store.string(forKey: Keys.ollamaModel)              ?? ollamaModel
+        self.avatarKind = store.string(forKey: Keys.avatarKind).flatMap(AvatarKind.init(rawValue:)) ?? avatarKind
+        self.symmetryAssistEnabled = (store.object(forKey: Keys.symmetryAssistEnabled) as? Bool) ?? symmetryAssistEnabled
+        self.symmetryAffectedSide = store.string(forKey: Keys.symmetryAffectedSide)
+            .flatMap(ExpressionTransforms.Side.init(rawValue:)) ?? symmetryAffectedSide
+        self.symmetryStrength = (store.object(forKey: Keys.symmetryStrength) as? Float) ?? symmetryStrength
+        self.expressionGainEnabled = (store.object(forKey: Keys.expressionGainEnabled) as? Bool) ?? expressionGainEnabled
+        self.expressionGain = (store.object(forKey: Keys.expressionGain) as? Float) ?? expressionGain
+        self.eyeContactEnabled = (store.object(forKey: Keys.eyeContactEnabled) as? Bool) ?? eyeContactEnabled
+        self.eyeContactStrength = (store.object(forKey: Keys.eyeContactStrength) as? Float) ?? eyeContactStrength
+        self.likenessEnabled = (store.object(forKey: Keys.likenessEnabled) as? Bool) ?? likenessEnabled
         if let raw = store.string(forKey: Keys.renderStyle), let style = RenderStyle(rawValue: raw) {
             self.renderStyle = style
         } else {

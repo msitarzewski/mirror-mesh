@@ -16,6 +16,10 @@ public final class NeutralPoseCalibrator: @unchecked Sendable {
 
     private var averaged: [LandmarkPoint] = []
     private var observed: Int = 0
+    /// Resting pupil offset (see `GeometricSolver.pupilOffset`). Averaged over the same frames as
+    /// the landmark baseline, so gaze is measured relative to wherever the operator rests their
+    /// eyes during calibration — in practice the screen.
+    private var gazeAveraged: SIMD2<Float>?
 
     public init(frameTarget: Int = 30, alpha: Float = 0.1) {
         self.frameTarget = frameTarget
@@ -40,6 +44,9 @@ public final class NeutralPoseCalibrator: @unchecked Sendable {
             averaged = pts
             observed = 0
         }
+        if let g = GeometricSolver.pupilOffset(landmarks.eyes) {
+            gazeAveraged = gazeAveraged.map { $0 * (1 - alpha) + g * alpha } ?? g
+        }
         observed += 1
     }
 
@@ -47,8 +54,11 @@ public final class NeutralPoseCalibrator: @unchecked Sendable {
         averaged.isEmpty ? nil : averaged
     }
 
+    public func neutralGaze() -> SIMD2<Float>? { gazeAveraged }
+
     public func reset() {
         averaged.removeAll(keepingCapacity: true)
         observed = 0
+        gazeAveraged = nil
     }
 }

@@ -41,6 +41,24 @@ public struct LandmarkPoint: Sendable, Codable, Hashable {
     public var simd: SIMD2<Float> { SIMD2(x, y) }
 }
 
+/// Pupil + eye-opening samples for one eye, normalized image space (origin top-left).
+/// Comes from Vision's named `leftPupil`/`leftEye` regions rather than fixed `allPoints`
+/// indices, so gaze doesn't depend on the undocumented ordering of the 76-point constellation.
+public struct EyeLandmarks: Sendable, Codable, Hashable {
+    public var pupil: LandmarkPoint
+    /// Centroid of the eye-opening contour.
+    public var center: LandmarkPoint
+    /// Horizontal extent of the eye-opening contour. Gaze offsets are normalized by this so
+    /// they're independent of face size and distance from the camera.
+    public var width: Float
+
+    public init(pupil: LandmarkPoint, center: LandmarkPoint, width: Float) {
+        self.pupil = pupil
+        self.center = center
+        self.width = width
+    }
+}
+
 /// Face landmarks for a single frame. The canonical point ordering follows the Apple Vision
 /// 76-point set documented in `docs/landmark-schema.md`.
 public struct LandmarkFrame: PipelineFrame, Sendable {
@@ -49,17 +67,56 @@ public struct LandmarkFrame: PipelineFrame, Sendable {
     public let points: [LandmarkPoint]
     public let confidence: Float
     public let faceBoundingBoxNorm: CGRect  // normalized [0,1] image space
+    /// Per-eye pupil samples sorted by image x (index 0 = image-left eye). Empty when the
+    /// backend can't see pupils (synthetic fixtures, MediaPipe, low light) — gaze then reads
+    /// as straight ahead.
+    public let eyes: [EyeLandmarks]
 
     public init(frameID: FrameID,
                 hostTimeNs: UInt64,
                 points: [LandmarkPoint],
                 confidence: Float,
-                faceBoundingBoxNorm: CGRect) {
+                faceBoundingBoxNorm: CGRect,
+                eyes: [EyeLandmarks] = []) {
         self.frameID = frameID
         self.hostTimeNs = hostTimeNs
         self.points = points
         self.confidence = confidence
         self.faceBoundingBoxNorm = faceBoundingBoxNorm
+        self.eyes = eyes
+    }
+}
+
+/// Conjugate gaze ⇄ ARKit `eyeLook*` coefficients. One definition shared by the solver (encode),
+/// the accessibility transforms, and `ExpressiveHead.metal` (decode, mirrored by hand — see the
+/// shader's `gazeFrom`).
+///
+/// Side convention matches the rest of the solver: "Left" keys belong to the **image-left** eye.
+/// `horizontal` is positive toward image-right, `vertical` positive up. Both in [-1, 1].
+/// For the image-left eye, looking image-right is looking *toward the nose* (`eyeLookIn`); for the
+/// image-right eye the same direction is `eyeLookOut`.
+public enum GazeChannels {
+    public static let keys: [BlendshapeKey] = [
+        .eyeLookInLeft, .eyeLookOutLeft, .eyeLookInRight, .eyeLookOutRight,
+        .eyeLookUpLeft, .eyeLookDownLeft, .eyeLookUpRight, .eyeLookDownRight,
+    ]
+
+    public static func encode(horizontal h: Float, vertical v: Float) -> [BlendshapeKey: Float] {
+        let h = max(-1, min(1, h))
+        let v = max(-1, min(1, v))
+        return [
+            .eyeLookInLeft: max(h, 0),  .eyeLookOutLeft: max(-h, 0),
+            .eyeLookOutRight: max(h, 0), .eyeLookInRight: max(-h, 0),
+            .eyeLookUpLeft: max(v, 0),  .eyeLookDownLeft: max(-v, 0),
+            .eyeLookUpRight: max(v, 0), .eyeLookDownRight: max(-v, 0),
+        ]
+    }
+
+    public static func decode(_ c: [BlendshapeKey: Float]) -> (horizontal: Float, vertical: Float) {
+        func k(_ key: BlendshapeKey) -> Float { c[key] ?? 0 }
+        let h = 0.5 * ((k(.eyeLookInLeft) - k(.eyeLookOutLeft)) + (k(.eyeLookOutRight) - k(.eyeLookInRight)))
+        let v = 0.5 * ((k(.eyeLookUpLeft) - k(.eyeLookDownLeft)) + (k(.eyeLookUpRight) - k(.eyeLookDownRight)))
+        return (h, v)
     }
 }
 

@@ -87,6 +87,20 @@ public struct PipelineOptions: Sendable {
     /// start. Photoreal does not bypass any disclosure path.
     public var photorealModelsDir: URL?
 
+    /// Which procedural avatar draws once an identity is loaded. Default `.classic` preserves the
+    /// v0.6 behavior; the app opts into `.expressive`. Same identity gate either way (R1): the
+    /// expressive head renders only when `ReenactStage` produced a frame.
+    public var avatar: AvatarKind
+    /// Accessibility transforms for the expressive avatar's coefficients. Disclosed in the
+    /// manifest (`expression_transformed`, `render.expression_transforms`) once they alter output.
+    public var expressionTransforms: ExpressionTransforms
+    /// Fit the expressive avatar to the consented identity's portrait (`PortraitAnalyzer`).
+    /// Analysis runs off the frame loop; the generic head draws until it lands. Disclosed as
+    /// `likeness_mapped` once a fitted frame renders.
+    public var likenessEnabled: Bool
+    /// Directory holding `depth_v1.mlpackage` for the likeness relief map. Nil → no relief.
+    public var likenessModelsDir: URL?
+
     public init(mode: PipelineMode = .synthetic,
                 captureWidth: Int = 640,
                 captureHeight: Int = 360,
@@ -106,7 +120,11 @@ public struct PipelineOptions: Sendable {
                 voiceLocale: String = "en-US",
                 translationEnabled: Bool = false,
                 translationOptions: TranslationStageOptions? = nil,
-                photorealModelsDir: URL? = nil) {
+                photorealModelsDir: URL? = nil,
+                avatar: AvatarKind = .classic,
+                expressionTransforms: ExpressionTransforms = .none,
+                likenessEnabled: Bool = false,
+                likenessModelsDir: URL? = nil) {
         self.mode = mode
         self.captureWidth = captureWidth
         self.captureHeight = captureHeight
@@ -127,6 +145,10 @@ public struct PipelineOptions: Sendable {
         self.translationEnabled = translationEnabled
         self.translationOptions = translationOptions
         self.photorealModelsDir = photorealModelsDir
+        self.avatar = avatar
+        self.expressionTransforms = expressionTransforms
+        self.likenessEnabled = likenessEnabled
+        self.likenessModelsDir = likenessModelsDir
     }
 }
 
@@ -193,6 +215,16 @@ public actor Pipeline {
     /// the stage has an identity loaded; never resets to false (R2-style disclosure semantics).
     /// Drives `WatermarkConfig.photoreal_active` at finalize time.
     private var photorealEverActive: Bool = false
+    /// Sticky: an accessibility transform altered a rendered expressive frame this session.
+    private var expressionTransformedEver: Bool = false
+    /// Transforms that altered output this session: one tag per kind (latest value), first-seen order.
+    private var expressionTransformTags: [String] = []
+    /// Sticky: a likeness-fitted frame rendered this session.
+    private var likenessEverMapped = false
+    /// Bumped on every identity / toggle change so a slow analysis can't install a stale likeness.
+    private var likenessGeneration = 0
+    /// True once a fitted likeness is installed on the renderer.
+    public private(set) var likenessActive = false
     /// v0.7.0/v0.8.0: live voice + translation stages. Constructed lazily inside `run()` when
     /// the corresponding option is enabled. Lifetime is bounded by the run-loop's cleanup tail.
     private var voiceStage: VoiceStage?
@@ -236,6 +268,89 @@ public actor Pipeline {
         watermarker?.visible = visible
     }
 
+    /// Switch avatars live. The manifest records the most recent kind.
+    public func setAvatarKind(_ kind: AvatarKind) async {
+        guard options.avatar != kind else { return }
+        options.avatar = kind
+        await refreshManifestRender()
+        refreshLikeness()
+    }
+
+    /// Update accessibility transforms live. Disclosure is recorded when a transform actually
+    /// alters a rendered frame, not here — enabling one while no avatar is drawn changes nothing.
+    public func setExpressionTransforms(_ transforms: ExpressionTransforms) {
+        options.expressionTransforms = transforms
+    }
+
+    /// Toggle portrait likeness live.
+    public func setLikenessEnabled(_ on: Bool) {
+        guard options.likenessEnabled != on else { return }
+        options.likenessEnabled = on
+        refreshLikeness()
+    }
+
+    /// (Re)fit the likeness for the current identity, or clear it. Analysis (Vision + one depth
+    /// inference) runs detached; the result installs only if nothing changed meanwhile.
+    private func refreshLikeness() {
+        likenessGeneration &+= 1
+        let generation = likenessGeneration
+        guard options.avatar == .expressive, options.likenessEnabled,
+              let identity = options.consentedIdentity, let png = options.consentedIdentityPNG,
+              renderer != nil else {
+            renderer?.expressiveHead.setLikeness(nil)
+            likenessActive = false
+            return
+        }
+        let modelsDir = options.likenessModelsDir
+        Task.detached { [weak self] in
+            let analyzer = await PortraitAnalyzer(modelsDir: modelsDir)
+            let result: Result<ExpressiveHeadRenderer.Likeness, Error> = Result {
+                try analyzer.analyze(identity: identity, pngBytes: png)
+            }
+            await self?.installLikeness(result, generation: generation, usedDepth: analyzer.hasDepth)
+        }
+    }
+
+    private func installLikeness(_ result: Result<ExpressiveHeadRenderer.Likeness, Error>,
+                                 generation: Int, usedDepth: Bool) async {
+        guard generation == likenessGeneration, let renderer else { return }
+        switch result {
+        case .success(let likeness):
+            renderer.expressiveHead.setLikeness(likeness)
+            likenessActive = true
+            likenessUsedDepth = usedDepth && likeness.relief != nil
+            await Telemetry.shared.emit(.annotation(key: "reenact.likeness", value: likenessUsedDepth ? "fitted+depth" : "fitted"))
+        case .failure(let error):
+            renderer.expressiveHead.setLikeness(nil)
+            likenessActive = false
+            await Telemetry.shared.emit(.warning(stage: .render, message: "Likeness fit skipped: \(error)"))
+        }
+    }
+
+    private var likenessUsedDepth = false
+
+    /// First likeness-fitted frame: flip the sticky disclosure and record the depth model.
+    private func noteLikenessMapped() async {
+        guard !likenessEverMapped, let writer = manifestWriter else { return }
+        likenessEverMapped = true
+        var pipeline = await writer.currentManifest.pipeline
+        pipeline.watermark.likeness_mapped = true
+        await writer.updatePipeline(pipeline)
+        if likenessUsedDepth, let dir = options.likenessModelsDir,
+           let ref = Self.depthModelRef(modelsDir: dir) {
+            await writer.appendModel(ref)
+        }
+    }
+
+    /// `ModelRef` for the depth model from its provenance sidecar (R5). Nil if the sidecar is absent.
+    static func depthModelRef(modelsDir: URL) -> ModelRef? {
+        let sidecar = modelsDir.appendingPathComponent("depth_v1.provenance.json")
+        guard let data = try? Data(contentsOf: sidecar),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let sha = json["sha256"] as? String else { return nil }
+        return ModelRef(name: "depth_v1", sha256: sha, provenance_path: "models/depth_v1.provenance.json")
+    }
+
     /// M56: hot-swap the consented identity while the pipeline is running. Passing `(nil, nil)`
     /// clears the identity and disables the stylized-head pass. Throws on verification failure;
     /// the previous identity (if any) stays loaded on failure.
@@ -267,6 +382,7 @@ public actor Pipeline {
                 await pstage.clearIdentity()
             }
         }
+        refreshLikeness()
     }
 
     /// v1.1.0: enable or disable the photoreal reenactment path at runtime. When called
@@ -427,16 +543,51 @@ public actor Pipeline {
         // photoreal_active=true for the rest of the session even if the operator toggles
         // it back off. Matches the disclosure-class semantics of voice_transformed.
         let photoreal = photorealEverActive || (photorealStage != nil)
-        let updated = WatermarkConfig(
-            visible: current.pipeline.watermark.visible,
-            signed: current.pipeline.watermark.signed,
-            audible_chirp: chirp,
-            voice_transformed: options.translationEnabled,
-            photoreal_active: photoreal
-        )
+        // Mutate rather than rebuild so flags owned by other paths (expression_transformed)
+        // keep their sticky value.
         var newPipeline = current.pipeline
-        newPipeline.watermark = updated
+        newPipeline.watermark.audible_chirp = chirp
+        newPipeline.watermark.voice_transformed = options.translationEnabled
+        newPipeline.watermark.photoreal_active = photoreal
+        newPipeline.watermark.expression_transformed = expressionTransformedEver
+        newPipeline.watermark.likeness_mapped = likenessEverMapped
         await writer.updatePipeline(newPipeline)
+    }
+
+    /// Re-encode the manifest's avatar + transform disclosure. No-op pre-`run()`.
+    private func refreshManifestRender() async {
+        guard let writer = manifestWriter else { return }
+        var newPipeline = await writer.currentManifest.pipeline
+        newPipeline.render.avatar = options.avatar.rawValue
+        newPipeline.render.expression_transforms = expressionTransformTags.isEmpty ? nil : expressionTransformTags
+        newPipeline.watermark.expression_transformed = expressionTransformedEver
+        await writer.updatePipeline(newPipeline)
+    }
+
+    /// Record that `transforms` altered a rendered frame. Updates the manifest only when the
+    /// disclosure actually changes (first activation, a new kind, or a new value), never per frame.
+    private func noteExpressionTransforms(_ transforms: ExpressionTransforms) async {
+        let merged = Self.mergeTransformTags(expressionTransformTags, transforms.manifestTags)
+        guard !expressionTransformedEver || merged != expressionTransformTags else { return }
+        expressionTransformedEver = true
+        expressionTransformTags = merged
+        await refreshManifestRender()
+    }
+
+    /// One tag per transform kind — the kind is the tag minus its trailing value
+    /// (`symmetry:left`, `gain`, `eye_contact`) — so dragging a strength slider updates the
+    /// recorded value instead of appending dozens of entries. Kinds keep first-seen order.
+    static func mergeTransformTags(_ existing: [String], _ incoming: [String]) -> [String] {
+        func kind(_ tag: String) -> String { tag.split(separator: ":").dropLast().joined(separator: ":") }
+        var out = existing
+        for tag in incoming {
+            if let i = out.firstIndex(where: { kind($0) == kind(tag) }) {
+                out[i] = tag
+            } else {
+                out.append(tag)
+            }
+        }
+        return out
     }
 
     public func run() async throws -> PipelineResult {
@@ -557,6 +708,9 @@ public actor Pipeline {
             }
         }
 
+        // Likeness fit runs detached; the generic expressive head draws until it lands.
+        refreshLikeness()
+
         // ── manifest ───────────────────────────────────────────────
         let consent = ConsentRecord(
             scheme: .selfAsSource,
@@ -582,7 +736,7 @@ public actor Pipeline {
                 smoothing: "one-euro"
             ),
             solver: SolverConfig(type: options.solverKind.rawValue, calibration_frames: 30),
-            render: RenderConfig(overlay: ["landmarks", "avatar_mask"]),
+            render: RenderConfig(overlay: ["landmarks", "avatar_mask"], avatar: options.avatar.rawValue),
             // R2 disclosure: chirp is mandatory whenever voice OR translation is active.
             // R12: the chirp is locked-on whenever translation is on (see AppSettings docs); the
             // manifest reflects whatever the *runtime* policy ended up doing, so we record true.
@@ -738,25 +892,45 @@ public actor Pipeline {
             // is built. Pose channels and non-mouth blendshapes pass through untouched — the
             // operator's silent face still drives everything above the mouth.
             var stylizedPayload: Renderer.StylizedHeadPayload? = nil
+            var expressivePayload: Renderer.ExpressiveHeadPayload? = nil
             if let lf = landmarks {
                 let reenacted = await reenactStage.apply(lf)
                 if var frame = reenacted.frame {
-                    if let tstage = self.translationStage,
-                       let model = await reenactStage.currentModel() {
-                        let overlay = tstage.currentOverlay(at: lf.hostTimeNs)
-                        if !overlay.values.isEmpty {
-                            frame = frame.overlayLipSync(overlay.values, using: model)
+                    let overlay = self.translationStage?.currentOverlay(at: lf.hostTimeNs).values ?? [:]
+                    if options.avatar == .expressive, let bf = blendshapes {
+                        // Expressive: the solver's ARKit-52 set drives the face. Accessibility
+                        // transforms reshape the operator's expression first; the lip-sync overlay
+                        // goes last so the audio path keeps its mouth precision.
+                        let transforms = options.expressionTransforms
+                        var coefficients = transforms.apply(bf.coefficients)
+                        if transforms.isActive && coefficients != bf.coefficients {
+                            await noteExpressionTransforms(transforms)
                         }
+                        coefficients = LipSyncARKitBridge.merge(overlay, into: coefficients)
+                        if likenessActive { await noteLikenessMapped() }
+                        expressivePayload = Renderer.ExpressiveHeadPayload(
+                            coefficients: coefficients,
+                            pose: ExpressiveHeadRenderer.Pose(
+                                yaw: frame.coefficients[.headYaw] ?? 0,
+                                pitch: frame.coefficients[.headPitch] ?? 0,
+                                roll: frame.coefficients[.headRoll] ?? 0
+                            ),
+                            faceBoundingBoxNorm: lf.faceBoundingBoxNorm
+                        )
+                    } else {
+                        if !overlay.isEmpty, let model = await reenactStage.currentModel() {
+                            frame = frame.overlayLipSync(overlay, using: model)
+                        }
+                        stylizedPayload = Renderer.StylizedHeadPayload(
+                            vertices: frame.vertices,
+                            normals: frame.normals,
+                            indices: frame.indices,
+                            yaw: frame.coefficients[.headYaw] ?? 0,
+                            pitch: frame.coefficients[.headPitch] ?? 0,
+                            roll: frame.coefficients[.headRoll] ?? 0,
+                            landmarkBoundingBoxNorm: lf.faceBoundingBoxNorm
+                        )
                     }
-                    stylizedPayload = Renderer.StylizedHeadPayload(
-                        vertices: frame.vertices,
-                        normals: frame.normals,
-                        indices: frame.indices,
-                        yaw: frame.coefficients[.headYaw] ?? 0,
-                        pitch: frame.coefficients[.headPitch] ?? 0,
-                        roll: frame.coefficients[.headRoll] ?? 0,
-                        landmarkBoundingBoxNorm: lf.faceBoundingBoxNorm
-                    )
                 }
             }
 
@@ -789,7 +963,7 @@ public actor Pipeline {
             // small stylized ghost that's its whole point. We explicitly skip the composite
             // path when `isWireframeStyle == true`.
             var photorealCompositeInput: Renderer.PhotorealComposite? = nil
-            var renderStylizedPayload: Renderer.StylizedHeadPayload? = stylizedPayload
+            let renderStylizedPayload: Renderer.StylizedHeadPayload? = stylizedPayload
             if options.rendererOptions.isWireframeStyle == false,
                let pstage = self.photorealStage {
                 let active = await pstage.hasIdentity
@@ -839,6 +1013,7 @@ public actor Pipeline {
                                                   landmarks: landmarks,
                                                   blendshapes: blendshapes,
                                                   stylizedHead: renderStylizedPayload,
+                                                  expressiveHead: expressivePayload,
                                                   photoreal: photorealCompositeInput) else {
                 await Telemetry.shared.emit(.warning(stage: .render, message: "render returned nil"))
                 // Close pipeline signpost on early-out so Instruments doesn't show an open interval.

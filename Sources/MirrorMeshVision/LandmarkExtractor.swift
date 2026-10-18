@@ -9,6 +9,8 @@ public final class VisionLandmarkBackend: LandmarkBackend, @unchecked Sendable {
     private let handler = VNSequenceRequestHandler()
     private var xFilters: [OneEuroFilter] = []
     private var yFilters: [OneEuroFilter] = []
+    /// Pupil + eye-centre smoothing, 4 values per eye (pupil x/y, centre x/y), image-left eye first.
+    private var eyeFilters: [OneEuroFilter] = Array(repeating: OneEuroFilter(), count: 8)
 
     public init() {}
 
@@ -33,7 +35,8 @@ public final class VisionLandmarkBackend: LandmarkBackend, @unchecked Sendable {
             return nil
         }
         guard let face = request.results?.first,
-              let landmarks = face.landmarks?.allPoints else {
+              let faceLandmarks = face.landmarks,
+              let landmarks = faceLandmarks.allPoints else {
             return nil
         }
 
@@ -68,13 +71,53 @@ public final class VisionLandmarkBackend: LandmarkBackend, @unchecked Sendable {
                                 width: bbox.size.width,
                                 height: bbox.size.height)
 
+        // Gaze inputs from Vision's *named* regions — allPoints' ordering is undocumented, the
+        // pupil and eye-contour regions are not.
+        var eyes = [
+            Self.eye(contour: faceLandmarks.leftEye, pupil: faceLandmarks.leftPupil, bbox: bbox),
+            Self.eye(contour: faceLandmarks.rightEye, pupil: faceLandmarks.rightPupil, bbox: bbox),
+        ]
+        .compactMap { $0 }
+        .sorted { $0.center.x < $1.center.x }
+        if eyes.count == 2 {
+            for (e, var eye) in eyes.enumerated() {
+                let f = e * 4
+                let t = frame.hostTimeNs
+                eye.pupil = LandmarkPoint(x: Float(eyeFilters[f].filter(Double(eye.pupil.x), atTimeNs: t)),
+                                          y: Float(eyeFilters[f + 1].filter(Double(eye.pupil.y), atTimeNs: t)))
+                eye.center = LandmarkPoint(x: Float(eyeFilters[f + 2].filter(Double(eye.center.x), atTimeNs: t)),
+                                           y: Float(eyeFilters[f + 3].filter(Double(eye.center.y), atTimeNs: t)))
+                eyes[e] = eye
+            }
+        } else {
+            eyes = []
+        }
+
         return LandmarkFrame(
             frameID: frame.frameID,
             hostTimeNs: frame.hostTimeNs,
             points: smoothed,
             confidence: Float(face.confidence),
-            faceBoundingBoxNorm: flippedBox
+            faceBoundingBoxNorm: flippedBox,
+            eyes: eyes
         )
+    }
+
+    /// One eye's pupil + contour centre/width in image-normalized space (origin top-left).
+    static func eye(contour: VNFaceLandmarkRegion2D?, pupil: VNFaceLandmarkRegion2D?, bbox: CGRect) -> EyeLandmarks? {
+        guard let contour, let pupil, contour.pointCount >= 3, let pp = pupil.normalizedPoints.first else {
+            return nil
+        }
+        func toImage(_ p: CGPoint) -> LandmarkPoint {
+            LandmarkPoint(x: Float(bbox.origin.x + p.x * bbox.size.width),
+                          y: Float(1.0 - (bbox.origin.y + p.y * bbox.size.height)))
+        }
+        let pts = contour.normalizedPoints.map(toImage)
+        let xs = pts.map(\.x)
+        let cx = xs.reduce(0, +) / Float(pts.count)
+        let cy = pts.map(\.y).reduce(0, +) / Float(pts.count)
+        guard let minX = xs.min(), let maxX = xs.max(), maxX - minX > 1e-5 else { return nil }
+        return EyeLandmarks(pupil: toImage(pp), center: LandmarkPoint(x: cx, y: cy), width: maxX - minX)
     }
 
     public func reset() {
@@ -82,6 +125,7 @@ public final class VisionLandmarkBackend: LandmarkBackend, @unchecked Sendable {
             xFilters[i].reset()
             yFilters[i].reset()
         }
+        for i in 0..<eyeFilters.count { eyeFilters[i].reset() }
     }
 }
 

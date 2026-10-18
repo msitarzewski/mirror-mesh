@@ -1,6 +1,8 @@
 import Testing
 import Foundation
 @testable import MirrorMeshAppKit
+import MirrorMeshCore
+import MirrorMeshSolver
 
 /// M38: AppSettings must round-trip through UserDefaults across instances.
 /// Tests run in isolation via per-test suite names so we don't pollute the host's `ai.mirrormesh`.
@@ -246,5 +248,63 @@ struct DisclosureChirpSynthesisTests {
             peakAmplitude: 0.125
         )
         #expect(samples.isEmpty)
+    }
+}
+
+@Suite("AvatarSettingsPersistence")
+@MainActor
+struct AvatarSettingsPersistenceTests {
+    private func withSuite(_ body: (String) -> Void) {
+        let suite = "ai.mirrormesh.tests.\(UUID().uuidString)"
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        body(suite)
+    }
+
+    @Test func appDefaultsToExpressiveWithNoTransforms() {
+        withSuite { suite in
+            let s = AppSettings(suiteName: suite)
+            #expect(s.avatarKind == .expressive)
+            #expect(!s.expressionTransforms.isActive)
+            #expect(s.likenessEnabled)
+            s.likenessEnabled = false
+            UserDefaults(suiteName: suite)?.synchronize()
+            #expect(AppSettings(suiteName: suite).likenessEnabled == false)
+        }
+    }
+
+    @Test func avatarAndAccessibilitySettingsRoundTrip() {
+        withSuite { suite in
+            let first = AppSettings(suiteName: suite)
+            first.avatarKind = .classic
+            first.symmetryAssistEnabled = true
+            first.symmetryAffectedSide = .right
+            first.symmetryStrength = 0.65
+            first.expressionGainEnabled = true
+            first.expressionGain = 2.25
+            first.eyeContactEnabled = true
+            first.eyeContactStrength = 0.4
+            UserDefaults(suiteName: suite)?.synchronize()
+
+            let second = AppSettings(suiteName: suite)
+            #expect(second.avatarKind == .classic)
+            #expect(second.symmetryAssistEnabled)
+            #expect(second.symmetryAffectedSide == .right)
+            #expect(second.symmetryStrength == 0.65)
+            #expect(second.expressionGain == 2.25)
+            #expect(second.eyeContactStrength == 0.4)
+            #expect(second.expressionTransforms.manifestTags == ["symmetry:right:0.65", "gain:2.25", "eye_contact:0.40"])
+        }
+    }
+
+    @Test func disabledTogglesKeepTunedStrengthsButApplyNothing() {
+        withSuite { suite in
+            let s = AppSettings(suiteName: suite)
+            s.expressionGain = 2.5
+            s.eyeContactStrength = 0.9
+            #expect(!s.expressionTransforms.isActive)
+            s.expressionGainEnabled = true
+            #expect(s.expressionTransforms.gain == 2.5)
+            #expect(s.expressionTransforms.eyeContact == 0)
+        }
     }
 }

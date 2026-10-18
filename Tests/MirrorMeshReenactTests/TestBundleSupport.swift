@@ -11,12 +11,13 @@ enum TestBundle {
         var png: Data
     }
 
+    /// `payload` defaults to synthetic bytes (hashing only); pass a real image to sign a portrait.
     static func makeSigned(
         scope: String = "v0.6+",
-        scheme: IdentityScheme = .stylizedNonHuman
+        scheme: IdentityScheme = .stylizedNonHuman,
+        payload: Data = Data(repeating: 0x37, count: 512)
     ) throws -> Signed {
-        // Synthetic "PNG" — bytes for hashing only.
-        let png = Data(repeating: 0x37, count: 512)
+        let png = payload
         let pngHash = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
 
         let key = Curve25519.Signing.PrivateKey()

@@ -314,6 +314,8 @@ private struct SettingsInspector: View {
 
             IdentityInspector(viewModel: viewModel)
 
+            AvatarInspector(viewModel: viewModel, settings: settings)
+
             VoiceInspector(viewModel: viewModel, settings: settings)
 
             TranslationInspector(viewModel: viewModel, settings: settings)

@@ -81,6 +81,23 @@ public final class Renderer: @unchecked Sendable {
         }
     }
 
+    /// Per-frame input for the SDF avatar (`AvatarKind.expressive`). Coefficients are the
+    /// solver's ARKit-52 set after any accessibility transforms; pose follows
+    /// `ExpressiveHeadRenderer.Pose` conventions. Mutually exclusive with `StylizedHeadPayload`
+    /// for the same frame — the pipeline hands over one or the other.
+    public struct ExpressiveHeadPayload: Sendable {
+        public var coefficients: [BlendshapeKey: Float]
+        public var pose: ExpressiveHeadRenderer.Pose
+        public var faceBoundingBoxNorm: CGRect?
+        public init(coefficients: [BlendshapeKey: Float],
+                    pose: ExpressiveHeadRenderer.Pose,
+                    faceBoundingBoxNorm: CGRect?) {
+            self.coefficients = coefficients
+            self.pose = pose
+            self.faceBoundingBoxNorm = faceBoundingBoxNorm
+        }
+    }
+
     public let context: MetalContext
     public let outputWidth: Int
     public let outputHeight: Int
@@ -96,6 +113,7 @@ public final class Renderer: @unchecked Sendable {
     /// over the live passthrough at the face bbox each frame. Replaces the v1.0 full-buffer
     /// substitution path that was aspect-stretching a 256x256 square to the full viewport.
     public let photorealOverlay: PhotorealOverlay
+    public let expressiveHead: ExpressiveHeadRenderer
 
     public init(context: MetalContext,
                 outputSize: (width: Int, height: Int),
@@ -111,6 +129,7 @@ public final class Renderer: @unchecked Sendable {
         self.meshRenderer = try FaceMeshRenderer(context: context)
         self.stylizedHead = try StylizedHeadRenderer(context: context)
         self.photorealOverlay = try PhotorealOverlay(context: context)
+        self.expressiveHead = try ExpressiveHeadRenderer(context: context)
     }
 
     /// Per-frame photoreal composite input handed to `render(...)`. When non-nil, the renderer
@@ -131,6 +150,7 @@ public final class Renderer: @unchecked Sendable {
                        landmarks: LandmarkFrame?,
                        blendshapes: BlendshapeFrame?,
                        stylizedHead payload: StylizedHeadPayload? = nil,
+                       expressiveHead expressivePayload: ExpressiveHeadPayload? = nil,
                        photoreal photorealComposite: PhotorealComposite? = nil) -> RenderedFrame? {
         TelemetryBus.emit(.stageStart(stage: .render,
                                       frame: captured.frameID,
@@ -259,6 +279,23 @@ public final class Renderer: @unchecked Sendable {
             } catch {
                 TelemetryBus.emit(.warning(stage: .render, message: "stylized head encode failed: \(error)"))
             }
+        }
+
+        // Expressive (SDF) avatar: same layering slot and the same style-dependent sizing rule
+        // as the classic head, expressed relative to the face box instead of NDC. Wireframe and
+        // photoreal keep it as a small ghost cue (~ the classic 0.18 vs 0.42 ratio); Mirror/Mask
+        // cover the operator's face.
+        if let expressive = expressivePayload {
+            let ghost = photorealComposite != nil || options.isWireframeStyle
+            expressiveHead.options.scale = ghost ? 0.43 : 1.0
+            expressiveHead.encode(
+                into: enc,
+                coefficients: expressive.coefficients,
+                pose: expressive.pose,
+                faceBoundingBox: expressive.faceBoundingBoxNorm,
+                viewportWidth: outputWidth,
+                viewportHeight: outputHeight
+            )
         }
 
         enc.endEncoding()

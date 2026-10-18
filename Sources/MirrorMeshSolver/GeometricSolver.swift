@@ -4,8 +4,9 @@ import MirrorMeshCore
 /// Converts 2D landmark deltas (vs the neutral pose) into ARKit-52 blendshape coefficients.
 ///
 /// All coefficients are clamped to [0, 1]. Coefficients that cannot be inferred from monocular
-/// 2D landmarks (e.g. `tongueOut`, `eyeLookIn/Out`, depth-dependent rolls) are emitted as zero
-/// rather than fabricated.
+/// 2D landmarks (e.g. `tongueOut`, depth-dependent rolls) are emitted as zero rather than
+/// fabricated. Gaze (`eyeLook*`) is measured only when the backend supplies pupils
+/// (`LandmarkFrame.eyes`); otherwise it stays zero.
 ///
 /// Telemetry: emits `.stageStart` / `.stageEnd` for `StageID.solver` around every `solve(_:)`.
 public final class GeometricSolver: ExpressionSolver, @unchecked Sendable {
@@ -15,6 +16,21 @@ public final class GeometricSolver: ExpressionSolver, @unchecked Sendable {
     /// Dead-band applied to every coefficient prior to scaling. Suppresses noise from
     /// sub-pixel landmark jitter when the face is at rest.
     public var hysteresis: Float = 0.02
+
+    /// Pupil offset (in eye-widths) → full-scale gaze, per axis.
+    public var gazeGain = SIMD2<Float>(4.0, 7.0)
+
+    /// Mean pupil offset from the eye-opening centre, in eye widths (x right, y down), over the
+    /// eyes the backend reported. Nil when no usable eye was seen.
+    public static func pupilOffset(_ eyes: [EyeLandmarks]) -> SIMD2<Float>? {
+        var sum = SIMD2<Float>.zero
+        var n: Float = 0
+        for e in eyes where e.width > 1e-5 {
+            sum += SIMD2(e.pupil.x - e.center.x, e.pupil.y - e.center.y) / e.width
+            n += 1
+        }
+        return n > 0 ? sum / n : nil
+    }
 
     public init(calibrationFrames: Int = 30,
                 neutralAlpha: Float = 0.1,
@@ -53,11 +69,18 @@ public final class GeometricSolver: ExpressionSolver, @unchecked Sendable {
             )
         }
 
-        let raw = computeCoefficients(
+        var raw = computeCoefficients(
             current: landmarks.points,
             neutral: neutral,
             faceBox: landmarks.faceBoundingBoxNorm
         )
+        if let pupil = Self.pupilOffset(landmarks.eyes) {
+            let rel = pupil - (calibrator.neutralGaze() ?? .zero)
+            // Pupils travel ~±0.25 eye-widths horizontally and about half that vertically at
+            // comfortable extremes. Image y grows downward, so looking up is negative dy.
+            let gaze = GazeChannels.encode(horizontal: rel.x * gazeGain.x, vertical: -rel.y * gazeGain.y)
+            for (k, v) in gaze { raw[k] = abs(v) < hysteresis ? 0 : v }
+        }
         let smoothed = smoother.smooth(raw)
         let clamped = clamp(smoothed)
 
