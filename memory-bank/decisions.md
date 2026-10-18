@@ -97,6 +97,41 @@ Restore real test targets (`.testTarget` with `import Testing`) in `Package.swif
 
 ---
 
+## 2026-10-18 — ADR-0016: Code-Authored Expressive Avatar Becomes the Main Reenactment Path
+
+**Status**: Approved (maintainer, 2026-10-18)
+**Context**: Photoreal (LivePortrait via CoreML) is correct since v1.3 but runs ~200 ms/frame; the
+v2 plan needed 4–6 weeks of MPSGraph porting to reach 25–30 fps, and the project was shelved. Opus
+5.5 can author highly detailed procedural graphics in code. A procedural avatar is license-clean,
+asset-free (R5 trivially satisfied), deterministic, and fits the "no AI-generated people" trust
+posture better than a generator.
+**Decision**:
+1. The expressive SDF avatar (`ExpressiveHead.metal`) is the main reenactment path. It consumes the
+   solver's ARKit-52 coefficients + `LandmarkSolver` pose + pupil gaze. Classic stays selectable;
+   LivePortrait photoreal stays shelved (not deleted) and no longer auto-enables over it.
+2. Accessibility transforms (symmetry assist, expression gain, eye-contact assist) act on the
+   coefficient stream and are disclosures: sticky `watermark.expression_transformed` +
+   `render.expression_transforms` (one tag per kind).
+3. Portrait likeness fits the avatar to the consented identity's portrait (proportions, projected
+   de-lit skin, painted brows, hair fit, depth relief). Gated by bundle verification (R1); disclosed
+   as sticky `watermark.likeness_mapped`; the depth model is recorded as a `ModelRef`.
+4. Depth model: Apple's Core ML **Depth Anything V2 Small** (Apache-2.0) at
+   `models/depth_v1.mlpackage` with a provenance sidecar; per-user install like other weights.
+   Runs once per identity load, never per frame. FaceDepth (CC-BY-NC, 668 MB) is a compatible
+   optional upgrade, not the default.
+**Alternatives**:
+- Continue the MPSGraph port of LivePortrait — weeks of work for a generator the trust thesis is
+  wary of; kept as a shelved option.
+- FLAME / 3DMM fitting (EMOCA, Pixel3DMM) — heavier stacks, PyTorch-first, licence review needed.
+- Depth Anything 3 — no Core ML build; PyTorch/MPS only.
+**Consequences**: +Realtime with large headroom (~2 ms GPU/frame), deterministic output (enables
+golden tests and future replayable provenance), license-clean. −Stylized likeness, not
+photographic; hairstyle shape is the largest likeness gap; goldens may need re-recording on other
+GPU families.
+**References**: `tasks/2026-10/261018_expressive-avatar.md`
+
+---
+
 ## 2026-05-20 — ADR-0015: License Simplification — AGPL-3.0-only, research-only posture
 
 **Status**: Approved (2026-05-20). Supersedes the dual-license portion of ADR-0014.

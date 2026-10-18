@@ -1,3 +1,13 @@
 {"timestamp":"2026-05-19T00:00:00Z","mode":"standard","mb_version":"2026-05","event":"session_start","note":"framework scaffold from mision.md"}
 {"timestamp":"2026-05-19T00:00:01Z","event":"files_created","files":["projectbrief.md","productContext.md","systemPatterns.md","techContext.md","activeContext.md","progress.md","projectRules.md","decisions.md","quick-start.md","build-deployment.md","testing-patterns.md","toc.md","tasks/2026-05/README.md"]}
 {"timestamp":"2026-05-19T00:00:02Z","event":"state_transition","from":"INIT","to":"PLAN","substate":"IDLE"}
+{"timestamp":"2026-10-18T00:00:00Z","mode":"fast","mb_version":"2026-05","event":"session_start","note":"fast-track startup; repo relocated Clean/ -> Software/; swift package reset to clear stale .build artifact paths"}
+{"timestamp":"2026-10-18T00:30:00Z","event":"state_transition","from":"PLAN","to":"BUILD","substate":"CODING","task":"expressive-avatar","branch":"expressive-avatar","note":"maintainer: Plan and build it, please"}
+{"timestamp":"2026-10-18T12:00:00Z","event":"state_transition","from":"BUILD","to":"DIFF","task":"expressive-avatar"}
+{"timestamp":"2026-10-18T12:05:00Z","event":"state_transition","from":"DIFF","to":"QA","substate":"RUNNING","result":"266 tests / 52 suites pass; GPU median 1.98ms @1280x720"}
+{"timestamp":"2026-10-18T12:06:00Z","event":"approval_requested","state":"APPROVAL","task":"expressive-avatar"}
+{"timestamp":"2026-10-18T15:00:00Z","event":"state_transition","from":"APPROVAL","to":"BUILD","task":"expressive-avatar/portrait-likeness","note":"maintainer: map to an existing portrait; use depth tools; use the web"}
+{"timestamp":"2026-10-18T16:30:00Z","event":"state_transition","from":"BUILD","to":"QA","result":"276 tests / 53 suites pass; GPU median 1.97ms @1280x720"}
+{"timestamp":"2026-10-18T16:31:00Z","event":"approval_requested","state":"APPROVAL","task":"expressive-avatar + portrait-likeness"}
+{"timestamp":"2026-10-18T17:30:00Z","event":"state_transition","from":"APPROVAL","to":"APPLY","note":"maintainer: approved, commit it"}
+{"timestamp":"2026-10-18T17:35:00Z","event":"state_transition","from":"APPLY","to":"DOCS","files":["tasks/2026-10/261018_expressive-avatar.md","tasks/2026-10/README.md","decisions.md#ADR-0016","toc.md","progress.md","activeContext.md","CHANGELOG.md","RESUME.md"]}

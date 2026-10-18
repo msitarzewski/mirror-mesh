@@ -2,7 +2,17 @@
 
 > **One-screen state-of-the-project. Read this first after a /compact or fresh session.**
 
-## Status as of 2026-05-25 — PHOTOREAL CORRECTNESS RESOLVED (Phase 1 of v2 plan)
+## Status as of 2026-10-18 — EXPRESSIVE AVATAR (branch `expressive-avatar`, ADR-0016)
+
+The project is un-shelved with a new main line: a **code-authored expressive avatar** — an SDF head raymarched in Metal (`Sources/MirrorMeshRender/Shaders/ExpressiveHead.metal`), driven by the solver's ARKit-52 coefficients, head pose and pupil gaze — at ~2 ms GPU per 1280×720 frame. It fits itself to the consented identity's portrait (`PortraitAnalyzer`: Vision landmarks + person segmentation + Core ML Depth Anything V2 Small at `models/depth_v1.mlpackage`), and supports accessibility transforms (symmetry assist, expression gain, eye-contact assist). All of it is disclosed in the signed manifest (`expression_transformed`, `likeness_mapped`). LivePortrait photoreal is shelved, not deleted, and no longer auto-enables over the expressive avatar.
+
+**Read next**: `memory-bank/tasks/2026-10/261018_expressive-avatar.md` (what shipped, lessons, follow-ups), `memory-bank/decisions.md#ADR-0016`.
+**Dev loop**: `MIRRORMESH_AVATAR_PREVIEW_DIR=<dir> swift test --filter ExpressiveHeadPreview` (expression sheet) / `--filter PortraitAnalyzerTests` (likeness sheet). Re-record goldens after intentional shader changes: `MIRRORMESH_RECORD_GOLDENS=1 swift test --filter ExpressiveHeadRenderingTests`.
+**Tests**: 276 / 53 suites green.
+
+---
+
+## Earlier status (2026-05-25) — photoreal correctness resolved (Phase 1 of v2 plan)
 
 The 2026-05-20 pause is over. **The Swift LivePortrait inference graph is correct.** The "broken visual output" was rooted in a missing face-bbox crop on the driver path — five `mirrormesh-photoreal-bench` runs against `Tests/MirrorMeshReenactTests/fixtures/lp_diff/` (LP's own upstream demo assets, s0 + d12) settled it in under an hour. Color path, channel order, `transform_keypoint`, appearance/motion/warp/generator are all correct.
 
@@ -68,7 +78,7 @@ v1.0.0  ✅  Ship-ready         — RELEASE_NOTES + README; notarization scripts
 ## How to feel the WOW
 
 ```bash
-cd /Users/michael/Clean/mirror-mesh
+cd /Users/michael/Software/mirror-mesh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
 # 0) Clean state — if you've been iterating and want a guaranteed-fresh app.
@@ -121,4 +131,4 @@ swift build && swift test --skip MirrorMeshStreamTests --skip MirrorMeshVirtualC
 
 ---
 
-*Last updated 2026-05-20 by Claude Opus 4.7. If this file is older than the most recent commit, trust the commit log over this file.*
+*Last updated 2026-10-18 by Claude Opus 5.5. If this file is older than the most recent commit, trust the commit log over this file.*

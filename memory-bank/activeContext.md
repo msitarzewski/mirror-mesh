@@ -1,8 +1,34 @@
 # MirrorMesh — Active Context
 
-**Updated**: 2026-05-25 (Phase 1 committed `a3b599d`; v1.4 follow-ups + Phase 2 tooling shipped; ready for actual MPSGraph porting)
-**Current state machine position**: `DOCS` (v1.4 batch awaiting commit + memory update)
+**Updated**: 2026-10-18 (project un-shelved; Expressive Avatar milestone in BUILD on branch `expressive-avatar`)
+**Current state machine position**: `DOCS` complete → `IDLE` (Expressive Avatar + Accessibility Transforms + Portrait Likeness approved 2026-10-18 — "approved, commit it" — and committed on branch `expressive-avatar`; not merged to main, not pushed)
 **Substate**: `IDLE`
+
+**QA (2026-10-18)**: 266 tests / 52 suites green (was 217/42). ExpressiveHead GPU median ~2.0 ms @ 1280×720 with face at 45% frame height (M5 Max). 7 golden PNGs in `Tests/MirrorMeshRenderTests/Goldens/` (re-record: `MIRRORMESH_RECORD_GOLDENS=1 swift test --filter ExpressiveHeadRenderingTests`). Dev previews: `MIRRORMESH_AVATAR_PREVIEW_DIR=<dir> swift test --filter ExpressiveHeadPreview` (expression sheet) / `--filter ExpressiveAvatarPipelinePreviewTests` (recorded .mov per style). Risk: goldens may exceed tolerance on CI's virtualized GPU — re-record or widen if CI flags them.
+**Diff**: 32 files, ~2.6k insertions. New: `ExpressiveHeadRenderer.swift`, `Shaders/ExpressiveHead.metal` (~730 lines SDF), `ExpressionTransform.swift`, `AvatarInspector.swift` + tests. Extended: RenderStyle (AvatarKind), FrameProtocols (EyeLandmarks, GazeChannels), LandmarkExtractor (pupils), GeometricSolver + NeutralPoseCalibrator (gaze), Renderer, MetalContext, Pipeline (avatar option, transforms, disclosure), PipelineConfig (render.avatar, render.expression_transforms, watermark.expression_transformed), ReenactFrame+Overlay (LipSyncARKitBridge), PipelineViewModel/AppSettings, ContentView.
+**Portrait likeness (2026-10-18, same branch, uncommitted)**: `PortraitAnalyzer` (MirrorMeshReenact, R1-gated: verifies the .mmid) fits the expressive head to the identity portrait — Vision landmarks → `Anatomy` (brows, nose, mouth, lips, jaw, cheeks, chin, eyes; hair line/fringe/crown/width from Vision person segmentation), portrait resampled into a head-aligned canonical texture, skin-masked de-lighting, skin/lip/brow projection mask, hair-colour coverage, and optional depth relief from `models/depth_v1.mlpackage` (Apple Core ML Depth Anything V2 Small, Apache-2.0, provenance sidecar, gitignored like other weights). Shader: anatomy uniforms, rest-coordinate texture lookup (jaw undone), painted portrait brows warped by brow coefficients, relief band-passed (removes DINOv2 14-px patch grid). Manifest: sticky `watermark.likeness_mapped` + depth `ModelRef`. App: "Match identity portrait" toggle (default on). QA: 276 tests / 53 suites green, GPU ~2 ms @ 1280×720. Dev preview: `MIRRORMESH_AVATAR_PREVIEW_DIR=<dir> swift test --filter PortraitAnalyzerTests` (fixture: Sargent's *Lady Agnew*, public domain). Honest status: recognisable features on a stylized head; hairstyle shape (e.g. updos) is the largest remaining likeness gap.
+
+**Observed, not changed**: classic `StylizedHeadRenderer` applies pitch/roll with the opposite sign to `LandmarkSolver`'s documented convention (expressive renderer uses the documented one); visible badge text overflows its box at 640 px wide.
+
+## 2026-10-18 — Expressive Avatar milestone (milestone ID: unassigned — maintainer to assign)
+
+**Why**: project was shelved 2026-05-25 because photoreal (LivePortrait) needs 4-6 weeks of MPSGraph porting to hit 25-30fps. New approach: author a high-fidelity *procedural* avatar in code (SDF raymarched in Metal), driven by the ARKit-52 coefficient stream — sidesteps ML inference cost, stays license-clean + asset-free, aligns with the "no AI-generated people" trust thesis. LivePortrait path untouched (shelved, not deleted).
+
+**Scope (items 1+2+5 of the 2026-10-18 review)**:
+1. `ExpressiveHeadRenderer` + `Shaders/ExpressiveHead.metal` — SDF head (eyes w/ iris+cornea, lids, teeth, tongue, jaw, lips, brows, hair, ears, neck), driven by 52 coefs + pose + gaze
+2. Gaze signal: Vision pupils → `LandmarkFrame.eyes` → `GeometricSolver` eyeLook* keys
+3. `ExpressionTransform` (MirrorMeshSolver): symmetry assist (paralysis compensation), expression gain, eye-contact assist; disclosed in manifest (`expression_transformed`, sticky)
+4. Pipeline `avatar` option (default `.classic` preserves behavior; app defaults `.expressive`)
+5. Avatar & Accessibility inspector + AppSettings persistence
+6. Golden-frame + property tests (`MIRRORMESH_RECORD_GOLDENS=1` re-records)
+
+**Repo moved** `~/Clean/mirror-mesh` → `~/Software/mirror-mesh`; required `swift package reset` (stale `.build/workspace-state.json` artifact paths). Baseline before this milestone: 217 tests / 42 suites green.
+
+**Loose context**: maintainer's framing — "remind you [Opus 5.5] that you have this ability [code-authored motion graphics], refresh the ideas, see if your perspectives lead to improvements." openai/math repo reviewed: no load-bearing results (Barker ≤13 and existential merit-factor results only touch future in-band watermark sync-code design). Follow-ups queued (not in this milestone): replayable provenance (signed coefficient log + re-render verify), re-encode-robust in-band watermark (closes the virtual-cam → Zoom verification gap; `FrameSigner.swift:45-60` hashes exact bytes). Hardcoded `/Users/michael/Clean` paths at `MirrorMesh/MirrorMeshApp.swift:102,128` + wrong GitHub org at `:114` flagged, not yet fixed.
+
+---
+
+**Previous state (2026-05-25)**: `DOCS` (v1.4 batch) — since committed as `c12be33` + `c90743e`.
 
 **Photoreal status — verified correct**: The Swift LivePortrait inference graph is correct. Five `mirrormesh-photoreal-bench` runs on `Tests/MirrorMeshReenactTests/fixtures/lp_diff/{s0,d0}.jpg` (LP's own upstream demo assets) settled it:
 

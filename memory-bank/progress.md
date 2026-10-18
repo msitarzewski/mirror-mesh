@@ -1,20 +1,19 @@
 # MirrorMesh — Progress
 
-**Updated**: 2026-05-25
+**Updated**: 2026-10-18
 
 ---
 
 ## Current Status
 
-**Phase**: v1.4 "Photoreal Working" — 🟢 ACTIVE. Phase 1 of photoreal v2 plan complete; Phase 2 tooling shipped.
-**Build status**: `swift build` clean across 15 library modules + 10 CLIs (added mirrormesh-photoreal-bench) + 1 app target
-**Tests**: 217 tests / 42 suites passing under Swift Testing
-**Closed today (2026-05-25)**: Photoreal correctness investigation (Phase 1 of v2 plan); driver-side face-crop fix; bench CLI for standalone inference + value-equivalence diffing; lip-sync ghost overlay over photoreal; identity inspector thumbnail; Phase 2 tensor-dump tooling.
-**Open milestones**: M81/M82/M83 (notarization — blocked on Team ID); M75/M76 (paper bench measurements for camera-ready); Phase 2 actual MPSGraph porting (multi-week, gated on user direction); Phase 3-5 of v2 plan (zero-copy GPU, pipelined async, model distillation).
-**License**: **AGPL-3.0-only research project** (ADR-0015 supersedes ADR-0014). Copyright "Michael Sitarzewski".
-**Hardware**: User on M5 Max / 128 GB / 40 GPU cores — ML model selection unconstrained.
-**Open inputs from user**: `DEVELOPMENT_TEAM`, App Store Connect API key, GitHub remote URL.
-**Project status (2026-05-25)**: ACTIVE again. Photoreal substitution visually works end-to-end (user: "JPG over my face, head tracking working, mouth was off but way closer than anything we've done before"). The 2026-05-20 pause is over.
+**Phase**: Expressive avatar (milestone ID pending) — 🟢 ACTIVE. Project un-shelved 2026-10-18 with a new main line: code-authored SDF avatar + accessibility transforms + consented-portrait likeness (ADR-0016). LivePortrait photoreal shelved (not deleted).
+**Build status**: `swift build` clean across library modules + CLIs + app target
+**Tests**: 276 tests / 53 suites passing under Swift Testing (was 217/42)
+**Performance**: ExpressiveHead ~2 ms GPU per 1280×720 frame (M5 Max); app synthetic preview 3.94 ms end-to-end P50 with photoreal off
+**Open milestones**: hair silhouette fitting, eye-shape fit, replayable provenance, in-band watermark (see `tasks/2026-10/261018_expressive-avatar.md#Follow-ups`); M81/M82/M83 notarization (Team ID); M75/M76 paper benches
+**License**: **AGPL-3.0-only research project** (ADR-0015). Copyright "Michael Sitarzewski".
+**Hardware**: User on M5 Max / 128 GB / 40 GPU cores.
+**Open inputs from user**: milestone ID for the expressive-avatar work, `DEVELOPMENT_TEAM`, App Store Connect API key.
 
 ## Done
 
@@ -89,6 +88,7 @@
   → generator → appearance).
   3 new tensor-dump tests. 214/41 → 217/42 green.
 
+- 2026-10-18 — **Expressive avatar + accessibility transforms + portrait likeness**: SDF head in Metal driven by ARKit-52 + pose + pupil gaze; symmetry/gain/eye-contact transforms disclosed in the manifest; portrait likeness via Vision landmarks, person segmentation and Core ML Depth Anything V2 Small, identity-gated and disclosed (`likeness_mapped`). 276 tests / 53 suites. See `tasks/2026-10/261018_expressive-avatar.md`, ADR-0016.
 ## In Progress
 
 - Awaiting user direction on first development milestone (see `activeContext.md` pending decisions)

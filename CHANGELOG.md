@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — Expressive avatar (milestone ID pending) — 2026-10-18
+
+### Added
+- **Expressive avatar** (`AvatarKind.expressive`): an SDF head raymarched in Metal, driven by the solver's ARKit-52 coefficients, head pose and pupil-measured gaze — eyes with iris and catch-lights, blinking lids with a lash line, hinged jaw with teeth and tongue, lips, brows, hair. ~2 ms GPU per 1280×720 frame on M5 Max. No meshes, textures or weights ship; the shader is the asset. The app defaults to it; the classic head stays selectable.
+- **Gaze**: Vision pupils feed `LandmarkFrame.eyes`; the geometric solver now emits `eyeLook*`, relative to the calibrated resting gaze.
+- **Accessibility transforms**: symmetry assist (facial paralysis), expression gain, eye-contact assist — disclosed in the manifest (`watermark.expression_transformed`, `render.expression_transforms`).
+- **Portrait likeness**: the avatar fits itself to the consented identity's portrait — proportions from Vision landmarks, hair from person segmentation, de-lit skin and the portrait's own brows projected onto the head, and surface relief from Apple's Core ML Depth Anything V2 Small (`models/depth_v1.mlpackage`, Apache-2.0, optional). Identity-gated; disclosed as `watermark.likeness_mapped`.
+- **Avatar & Accessibility inspector** sections; `ExpressiveHeadRenderer.renderOffscreen` for goldens/previews; opt-in preview tests (`MIRRORMESH_AVATAR_PREVIEW_DIR`).
+
+### Changed
+- Photoreal no longer auto-enables when the expressive avatar is selected, and the "Photoreal: ON" row can now be tapped to disable it.
+- Lip-sync overlay is bridged onto ARKit mouth keys for the expressive avatar (`LipSyncARKitBridge`).
+
 ## v1.4 — 2026-05-25
 
 ### Added

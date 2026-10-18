@@ -1,6 +1,6 @@
 # MirrorMesh Memory Bank — Table of Contents
 
-**Updated**: 2026-05-19
+**Updated**: 2026-10-18
 
 ---
 
@@ -24,6 +24,11 @@
 - [`quick-start.md`](./quick-start.md) — Session bootstrap for agents
 - [`build-deployment.md`](./build-deployment.md) — Build, sign, notarize, CI, release
 - [`testing-patterns.md`](./testing-patterns.md) — Test categories, fixtures, discipline
+
+## Tasks
+
+- [`tasks/2026-05/README.md`](./tasks/2026-05/README.md) — project bootstrap through v1.4
+- [`tasks/2026-10/README.md`](./tasks/2026-10/README.md) — expressive avatar + portrait likeness (ADR-0016)
 
 ## Resume
 
