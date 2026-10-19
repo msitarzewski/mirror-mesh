@@ -11,3 +11,7 @@
 {"timestamp":"2026-10-18T16:31:00Z","event":"approval_requested","state":"APPROVAL","task":"expressive-avatar + portrait-likeness"}
 {"timestamp":"2026-10-18T17:30:00Z","event":"state_transition","from":"APPROVAL","to":"APPLY","note":"maintainer: approved, commit it"}
 {"timestamp":"2026-10-18T17:35:00Z","event":"state_transition","from":"APPLY","to":"DOCS","files":["tasks/2026-10/261018_expressive-avatar.md","tasks/2026-10/README.md","decisions.md#ADR-0016","toc.md","progress.md","activeContext.md","CHANGELOG.md","RESUME.md"]}
+{"timestamp":"2026-10-18T18:10:00Z","event":"state_transition","from":"DOCS","to":"APPLY","note":"maintainer: merge it to main and push; fast-forward main to 3d41c0b, pushed"}
+{"timestamp":"2026-10-18T18:40:00Z","event":"ci_failure","run":"39151152028","cause":"hosted macos-14 VM has no Vision inference context; IdentitySelfCapture continuation resumed twice; PortraitAnalyzer tests failed"}
+{"timestamp":"2026-10-18T19:30:00Z","event":"state_transition","from":"BUILD","to":"QA","task":"ci-vision-headless","result":"289 tests / 56 suites pass under plain swift test"}
+{"timestamp":"2026-10-19T05:00:00Z","event":"state_transition","from":"APPROVAL","to":"APPLY","task":"ci-vision-headless","note":"maintainer: update the memory bank, then commit push merge","files":["tasks/2026-10/261018_ci-vision-headless.md","tasks/2026-10/README.md","testing-patterns.md#Hosted CI limits","activeContext.md","progress.md","toc.md","CHANGELOG.md","RESUME.md"]}

@@ -8,7 +8,7 @@
 
 **Phase**: Expressive avatar (milestone ID pending) — 🟢 ACTIVE. Project un-shelved 2026-10-18 with a new main line: code-authored SDF avatar + accessibility transforms + consented-portrait likeness (ADR-0016). LivePortrait photoreal shelved (not deleted).
 **Build status**: `swift build` clean across library modules + CLIs + app target
-**Tests**: 276 tests / 53 suites passing under Swift Testing (was 217/42)
+**Tests**: 289 tests / 56 suites passing under Swift Testing (was 217/42). Vision-dependent tests skip on hosted CI runners (no inference context)
 **Performance**: ExpressiveHead ~2 ms GPU per 1280×720 frame (M5 Max); app synthetic preview 3.94 ms end-to-end P50 with photoreal off
 **Open milestones**: hair silhouette fitting, eye-shape fit, replayable provenance, in-band watermark (see `tasks/2026-10/261018_expressive-avatar.md#Follow-ups`); M81/M82/M83 notarization (Team ID); M75/M76 paper benches
 **License**: **AGPL-3.0-only research project** (ADR-0015). Copyright "Michael Sitarzewski".
@@ -88,7 +88,8 @@
   → generator → appearance).
   3 new tensor-dump tests. 214/41 → 217/42 green.
 
-- 2026-10-18 — **Expressive avatar + accessibility transforms + portrait likeness**: SDF head in Metal driven by ARKit-52 + pose + pupil gaze; symmetry/gain/eye-contact transforms disclosed in the manifest; portrait likeness via Vision landmarks, person segmentation and Core ML Depth Anything V2 Small, identity-gated and disclosed (`likeness_mapped`). 276 tests / 53 suites. See `tasks/2026-10/261018_expressive-avatar.md`, ADR-0016.
+- 2026-10-18 — **Expressive avatar + accessibility transforms + portrait likeness**: SDF head in Metal driven by ARKit-52 + pose + pupil gaze; symmetry/gain/eye-contact transforms disclosed in the manifest; portrait likeness via Vision landmarks, person segmentation and Core ML Depth Anything V2 Small, identity-gated and disclosed (`likeness_mapped`). 276 tests / 53 suites. See `tasks/2026-10/261018_expressive-avatar.md`, ADR-0016. Merged to `main` and pushed.
+- 2026-10-18 — **CI fix: Vision unavailable on hosted runners**: the first run on main crashed in `IdentitySelfCapture` (continuation resumed twice when Vision failed) and failed the `PortraitAnalyzer` tests. Synchronous Vision calls, `visionUnavailable` errors, tests gated on `PortraitAnalyzer.isVisionAvailable`. 289 tests / 56 suites. See `tasks/2026-10/261018_ci-vision-headless.md`.
 ## In Progress
 
 - Awaiting user direction on first development milestone (see `activeContext.md` pending decisions)

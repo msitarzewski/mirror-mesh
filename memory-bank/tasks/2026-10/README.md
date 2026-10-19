@@ -17,6 +17,13 @@ Metal, ~2 ms/frame) with accessibility transforms and a consented-portrait liken
 - Pattern: render → look → fix loop with preview sheets; goldens + property tests
 - See: [261018_expressive-avatar.md](./261018_expressive-avatar.md)
 
+### 2026-10-18: CI fix: Vision unavailable on hosted macOS runners
+- GitHub's `macos-14` VM can't create a Vision inference context; a double-resumed continuation in
+  `IdentitySelfCapture` crashed `swift test`, and `PortraitAnalyzer` tests failed
+- Synchronous Vision `perform`, `visionUnavailable` errors, tests gated on `PortraitAnalyzer.isVisionAvailable`
+- Files: `IdentitySelfCapture.swift`, `PortraitAnalyzer.swift` + 3 test files
+- See: [261018_ci-vision-headless.md](./261018_ci-vision-headless.md)
+
 ## In Progress
 
 - Milestone ID for this work (maintainer to assign)

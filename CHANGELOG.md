@@ -13,6 +13,10 @@
 - Photoreal no longer auto-enables when the expressive avatar is selected, and the "Photoreal: ON" row can now be tapped to disable it.
 - Lip-sync overlay is bridged onto ARKit mouth keys for the expressive avatar (`LipSyncARKitBridge`).
 
+### Fixed
+- **Crash when Vision is unavailable**: `IdentitySelfCapture` resumed a continuation twice when Vision failed (it reports the error through both the completion handler and `perform`), which killed the process. Vision now runs synchronously, and a Mac that can't run it gets a `visionUnavailable` error instead. `PortraitAnalyzer` reports the same error.
+- **CI**: Vision-dependent tests now skip on GitHub's hosted macOS runners, which can't create a Vision inference context (`PortraitAnalyzer.isVisionAvailable`).
+
 ## v1.4 — 2026-05-25
 
 ### Added

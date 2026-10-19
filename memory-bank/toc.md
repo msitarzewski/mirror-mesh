@@ -28,7 +28,7 @@
 ## Tasks
 
 - [`tasks/2026-05/README.md`](./tasks/2026-05/README.md) — project bootstrap through v1.4
-- [`tasks/2026-10/README.md`](./tasks/2026-10/README.md) — expressive avatar + portrait likeness (ADR-0016)
+- [`tasks/2026-10/README.md`](./tasks/2026-10/README.md) — expressive avatar + portrait likeness (ADR-0016); CI fix for headless Vision
 
 ## Resume
 

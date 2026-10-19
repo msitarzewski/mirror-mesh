@@ -1,6 +1,6 @@
 # 261018_expressive-avatar
 
-**Milestone ID**: unassigned (maintainer to assign). Branch: `expressive-avatar`.
+**Milestone ID**: unassigned (maintainer to assign). Branch: `expressive-avatar`, fast-forward merged to `main` and pushed 2026-10-18.
 
 ## Objective
 

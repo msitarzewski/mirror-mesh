@@ -36,6 +36,19 @@
 - Each run records: machine model, OS, build commit, power mode (plugged/battery), thermal state at start
 - Comparisons are tag-stable: numbers cited in the paper must be reproducible from a tagged commit + scenario
 
+## Hosted CI limits
+
+GitHub's hosted macOS runners are VMs with no camera, no Speech authorization and **no Vision
+inference context** (every Vision request fails with Code=9 "Could not create inference context").
+Metal works there on a virtual GPU; the ExpressiveHead goldens pass within tolerance.
+
+- Gate tests that need these with `.enabled(if: <probe>, "<reason>")`. For Vision, use
+  `PortraitAnalyzer.isVisionAvailable`.
+- Keep the parts that don't need the framework running everywhere (e.g. identity-bundle tamper
+  rejection happens before any Vision work).
+- Production code must turn a framework failure into a thrown error, never a crash (see
+  `tasks/2026-10/261018_ci-vision-headless.md`).
+
 ## What We Don't Test (yet)
 
 - Long-running thermal characterization beyond 10 minutes — handled in a separate manual harness

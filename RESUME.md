@@ -2,13 +2,13 @@
 
 > **One-screen state-of-the-project. Read this first after a /compact or fresh session.**
 
-## Status as of 2026-10-18 — EXPRESSIVE AVATAR (branch `expressive-avatar`, ADR-0016)
+## Status as of 2026-10-18 — EXPRESSIVE AVATAR (on `main`, ADR-0016)
 
 The project is un-shelved with a new main line: a **code-authored expressive avatar** — an SDF head raymarched in Metal (`Sources/MirrorMeshRender/Shaders/ExpressiveHead.metal`), driven by the solver's ARKit-52 coefficients, head pose and pupil gaze — at ~2 ms GPU per 1280×720 frame. It fits itself to the consented identity's portrait (`PortraitAnalyzer`: Vision landmarks + person segmentation + Core ML Depth Anything V2 Small at `models/depth_v1.mlpackage`), and supports accessibility transforms (symmetry assist, expression gain, eye-contact assist). All of it is disclosed in the signed manifest (`expression_transformed`, `likeness_mapped`). LivePortrait photoreal is shelved, not deleted, and no longer auto-enables over the expressive avatar.
 
 **Read next**: `memory-bank/tasks/2026-10/261018_expressive-avatar.md` (what shipped, lessons, follow-ups), `memory-bank/decisions.md#ADR-0016`.
 **Dev loop**: `MIRRORMESH_AVATAR_PREVIEW_DIR=<dir> swift test --filter ExpressiveHeadPreview` (expression sheet) / `--filter PortraitAnalyzerTests` (likeness sheet). Re-record goldens after intentional shader changes: `MIRRORMESH_RECORD_GOLDENS=1 swift test --filter ExpressiveHeadRenderingTests`.
-**Tests**: 276 / 53 suites green.
+**Tests**: 289 / 56 suites green locally. On GitHub's hosted macOS runner, Vision-dependent tests skip (no Vision inference context there; see `memory-bank/testing-patterns.md#Hosted CI limits`).
 
 ---
 
