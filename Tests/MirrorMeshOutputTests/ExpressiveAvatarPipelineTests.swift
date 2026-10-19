@@ -135,7 +135,8 @@ struct ExpressiveAvatarPipelineTests {
         #expect(manifest.pipeline.render.expression_transforms == ["gain:1.50"])
     }
 
-    @Test func portraitLikenessIsFittedAndDisclosed() async throws {
+    @Test(.enabled(if: PortraitAnalyzer.isVisionAvailable, "Vision inference unavailable on this host"))
+    func portraitLikenessIsFittedAndDisclosed() async throws {
         let url = tmpManifestURL()
         let bundle = try makeSignedBundle(payload: Data(contentsOf: Self.portraitURL))
         var opts = options(avatar: .expressive, identity: bundle, frames: 0)

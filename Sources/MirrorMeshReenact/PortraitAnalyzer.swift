@@ -27,12 +27,15 @@ public final class PortraitAnalyzer: @unchecked Sendable {
         case imageDecodeFailed
         case noFace
         case landmarksIncomplete
+        /// Vision couldn't run (no inference context, e.g. a headless VM). Retrying won't help.
+        case visionUnavailable(String)
 
         public var description: String {
             switch self {
             case .imageDecodeFailed:   return "PortraitAnalyzer: identity image could not be decoded"
             case .noFace:              return "PortraitAnalyzer: no face found in the identity portrait"
             case .landmarksIncomplete: return "PortraitAnalyzer: portrait landmarks missing eyes, lips, nose or contour"
+            case .visionUnavailable(let m): return "PortraitAnalyzer: Vision unavailable on this Mac (\(m))"
             }
         }
     }
@@ -57,6 +60,19 @@ public final class PortraitAnalyzer: @unchecked Sendable {
 
     private let depthModel: MLModel?
     public var hasDepth: Bool { depthModel != nil }
+
+    /// Whether Vision can create an inference context here at all. Headless VMs (CI) can't; the
+    /// likeness then simply never installs. Probed once with a blank image (no face → empty
+    /// results, not an error).
+    public static let isVisionAvailable: Bool = {
+        let side = 64
+        var gray = [UInt8](repeating: 128, count: side * side)
+        guard let ctx = CGContext(data: &gray, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue),
+              let image = ctx.makeImage() else { return false }
+        return (try? VNImageRequestHandler(cgImage: image, orientation: .up)
+            .perform([VNDetectFaceRectanglesRequest()])) != nil
+    }()
 
     /// Loads the optional depth model from `modelsDir`. Depth is an enhancement: a missing or
     /// unloadable model leaves `hasDepth == false` and the likeness simply has no relief map.
@@ -162,7 +178,11 @@ public final class PortraitAnalyzer: @unchecked Sendable {
     private static func detectFace(_ image: CGImage) throws -> VNFaceObservation {
         let request = VNDetectFaceLandmarksRequest()
         request.revision = VNDetectFaceLandmarksRequestRevision3
-        try VNImageRequestHandler(cgImage: image, orientation: .up).perform([request])
+        do {
+            try VNImageRequestHandler(cgImage: image, orientation: .up).perform([request])
+        } catch {
+            throw AnalyzerError.visionUnavailable("\(error)")
+        }
         let faces = (request.results ?? []).filter { $0.landmarks != nil }
         guard let face = faces.max(by: { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height })
         else { throw AnalyzerError.noFace }

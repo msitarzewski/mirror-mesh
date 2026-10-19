@@ -51,6 +51,9 @@ public enum IdentitySelfCapture {
         case imageConversionFailed(String)
         /// Signing or persisting the bundle failed. Wraps the underlying error string.
         case mintFailed(String)
+        /// Vision couldn't run at all on this machine (e.g. no inference context in a headless
+        /// VM). Distinct from `noFaceDetected`: retrying won't help.
+        case visionUnavailable(String)
 
         public var description: String {
             switch self {
@@ -62,6 +65,8 @@ public enum IdentitySelfCapture {
                 return "IdentitySelfCapture: image conversion failed (\(m))"
             case .mintFailed(let m):
                 return "IdentitySelfCapture: mint failed (\(m))"
+            case .visionUnavailable(let m):
+                return "IdentitySelfCapture: face detection unavailable on this Mac (\(m))"
             }
         }
     }
@@ -71,7 +76,7 @@ public enum IdentitySelfCapture {
     /// Fraction of the Vision bbox to add on each side before center-squaring. 0.25
     /// is the value LivePortrait's reference preprocessing uses for head crops — it
     /// pulls in the hairline and chin without including too much background.
-    static let bboxPaddingFraction: CGFloat = 0.25
+    nonisolated static let bboxPaddingFraction: CGFloat = 0.25
 
     /// LivePortrait's source-image resolution. The motion/warp/generator graph is
     /// trained on 256² inputs; anything else burns time on resize and risks aliasing.
@@ -162,36 +167,30 @@ public enum IdentitySelfCapture {
     /// Vision uses a **normalized, origin-bottom-left** coordinate space (CoreGraphics
     /// convention). We return the bbox unchanged here; the bbox→image-space conversion
     /// is centralized in `expandedAndSquaredCrop` so the math lives in one place.
+    /// Synchronous `perform` + `results`, not a completion handler wrapped in a continuation:
+    /// when Vision fails, it both throws from `perform` *and* calls the completion handler with
+    /// the error, which resumed the continuation twice and crashed the process.
     private static func detectLargestFaceBoundingBox(in cgImage: CGImage) async throws -> CGRect {
-        try await withCheckedThrowingContinuation { cont in
-            let request = VNDetectFaceRectanglesRequest { req, err in
-                if let err {
-                    cont.resume(throwing: CaptureError.imageConversionFailed("Vision: \(err)"))
-                    return
-                }
-                let obs = (req.results as? [VNFaceObservation]) ?? []
-                guard !obs.isEmpty else {
-                    cont.resume(throwing: CaptureError.noFaceDetected)
-                    return
-                }
-                // Why "largest" not "highest-confidence": for a self-capture UX, the
-                // operator's face fills the frame; any bystander is geometrically smaller.
-                // Picking by area matches user intent better than picking by confidence.
-                let largest = obs.max { lhs, rhs in
-                    lhs.boundingBox.width * lhs.boundingBox.height
-                        < rhs.boundingBox.width * rhs.boundingBox.height
-                }!
-                cont.resume(returning: largest.boundingBox)
-            }
-            // Why .up: CGImage comes out of `cgImage(from:)` already in display
-            // orientation (we render through CIContext without applying any transform).
-            let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
-            do {
-                try handler.perform([request])
-            } catch {
-                cont.resume(throwing: CaptureError.imageConversionFailed("Vision handler: \(error)"))
-            }
+        let request = VNDetectFaceRectanglesRequest()
+        // Why .up: CGImage comes out of `cgImage(from:)` already in display
+        // orientation (we render through CIContext without applying any transform).
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:])
+        do {
+            try handler.perform([request])
+        } catch {
+            throw CaptureError.visionUnavailable("\(error)")
         }
+        let obs = request.results ?? []
+        // Why "largest" not "highest-confidence": for a self-capture UX, the
+        // operator's face fills the frame; any bystander is geometrically smaller.
+        // Picking by area matches user intent better than picking by confidence.
+        guard let largest = obs.max(by: { lhs, rhs in
+            lhs.boundingBox.width * lhs.boundingBox.height
+                < rhs.boundingBox.width * rhs.boundingBox.height
+        }) else {
+            throw CaptureError.noFaceDetected
+        }
+        return largest.boundingBox
     }
 
     /// Convert a Vision bbox (normalized, bottom-left) into an image-space pixel rect,

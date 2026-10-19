@@ -12,8 +12,12 @@ import MirrorMeshCore
 
 /// Fixture: `fixtures/lp_diff/s0.jpg` — Sargent's *Lady Agnew of Lochnaw* (1892), public domain,
 /// already vendored for the photoreal bench. A frontal, evenly lit face at modest resolution.
+/// Tests that need Vision inference are gated on `PortraitAnalyzer.isVisionAvailable` — headless
+/// CI VMs can't create an inference context (same environmental limit as the camera/Speech skips).
 @Suite("PortraitAnalyzer")
 struct PortraitAnalyzerTests {
+    static let vision = PortraitAnalyzer.isVisionAvailable
+
     static let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .appendingPathComponent("fixtures/lp_diff", isDirectory: true)
     static let repoModels = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -35,7 +39,8 @@ struct PortraitAnalyzerTests {
         return l.albedo[(j * l.albedoSize + i) * 4 + 3]
     }
 
-    @Test func fitsAPlausibleAnatomyFromThePortrait() async throws {
+    @Test(.enabled(if: PortraitAnalyzerTests.vision, "Vision inference unavailable on this host"))
+    func fitsAPlausibleAnatomyFromThePortrait() async throws {
         let l = try await PortraitAnalyzer(modelsDir: nil).analyze(image: Self.portrait())
         let a = l.anatomy
         // Proportions land inside the clamp range rather than pinned to an edge, in anatomical order.
@@ -48,7 +53,8 @@ struct PortraitAnalyzerTests {
         #expect(l.relief == nil)
     }
 
-    @Test func maskKeepsSkinAndDropsEyesAndHair() async throws {
+    @Test(.enabled(if: PortraitAnalyzerTests.vision, "Vision inference unavailable on this host"))
+    func maskKeepsSkinAndDropsEyesAndHair() async throws {
         let l = try await PortraitAnalyzer(modelsDir: nil).analyze(image: Self.portrait())
         #expect(Self.alpha(l, at: SIMD2(-0.36, -0.25)) > 128, "cheek should project")
         #expect(Self.alpha(l, at: SIMD2(0.36, -0.25)) > 128, "cheek should project")
@@ -56,7 +62,8 @@ struct PortraitAnalyzerTests {
         #expect(Self.alpha(l, at: SIMD2(0, -0.22)) > 0 || true)
     }
 
-    @Test func canonicalTextureAlignsEyesWithTheHead() async throws {
+    @Test(.enabled(if: PortraitAnalyzerTests.vision, "Vision inference unavailable on this host"))
+    func canonicalTextureAlignsEyesWithTheHead() async throws {
         // The dark pupils must land where the stock head's eyes are: texel lookups at (±0.30, 0.10)
         // are darker than the cheek below them.
         let l = try await PortraitAnalyzer(modelsDir: nil).analyze(image: Self.portrait())
@@ -74,7 +81,10 @@ struct PortraitAnalyzerTests {
         let bytes = try Data(contentsOf: Self.fixtures.appendingPathComponent("s0.jpg"))
         let signed = try TestBundle.makeSigned(scheme: .selfAsSource, payload: bytes)
         let analyzer = await PortraitAnalyzer(modelsDir: nil)
-        _ = try analyzer.analyze(identity: signed.identity, pngBytes: signed.png)
+        if Self.vision {
+            _ = try analyzer.analyze(identity: signed.identity, pngBytes: signed.png)
+        }
+        // Verification happens before any Vision work, so this holds on every host.
         var tampered = signed.png
         tampered[tampered.count / 2] ^= 0xFF
         #expect(throws: ConsentedIdentityError.self) {
@@ -90,7 +100,7 @@ struct PortraitAnalyzerTests {
         }
     }
 
-    @Test(.enabled(if: PortraitAnalyzerTests.depthModelsDir != nil))
+    @Test(.enabled(if: PortraitAnalyzerTests.depthModelsDir != nil && PortraitAnalyzerTests.vision))
     func depthReliefIsBoundedAndCentredOnTheFace() async throws {
         let analyzer = await PortraitAnalyzer(modelsDir: Self.depthModelsDir)
         #expect(analyzer.hasDepth)
@@ -106,7 +116,7 @@ struct PortraitAnalyzerTests {
 
     /// Dev loop, not CI: `MIRRORMESH_AVATAR_PREVIEW_DIR=/tmp/x swift test --filter PortraitAnalyzerTests`
     /// writes the canonical albedo / mask / relief and a sheet of likeness renders.
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["MIRRORMESH_AVATAR_PREVIEW_DIR"] != nil))
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["MIRRORMESH_AVATAR_PREVIEW_DIR"] != nil && PortraitAnalyzerTests.vision))
     func writeLikenessPreview() async throws {
         let dir = URL(fileURLWithPath: ProcessInfo.processInfo.environment["MIRRORMESH_AVATAR_PREVIEW_DIR"]!)
             .appendingPathComponent("likeness", isDirectory: true)

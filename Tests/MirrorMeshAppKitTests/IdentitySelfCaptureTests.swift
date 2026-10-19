@@ -142,6 +142,9 @@ struct IdentitySelfCaptureTests {
             // Vision didn't find a "face" on the synthetic image. That's an
             // accepted outcome on this test — the manual smoke is the source of
             // truth for the photoreal mint path with a real camera frame.
+        } catch IdentitySelfCapture.CaptureError.visionUnavailable {
+            // Headless CI VMs can't create a Vision inference context at all. Same
+            // accepted outcome — but it must surface as an error, never a crash.
         }
     }
 
